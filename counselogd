@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Counselog inference service wrapper (desktop side). Run from the repo root.
+# Serves bin-tagging and report generation over mutual TLS. Holds no key
+# material at rest: the laptop hands it the DEK per session.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${SCRIPT_DIR}/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON=python3
+fi
+PYTHONPATH="$SCRIPT_DIR" exec "$PYTHON" -m desktop "$@"

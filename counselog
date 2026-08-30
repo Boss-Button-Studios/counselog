@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Counselog CLI wrapper (laptop side). Run from the repo root.
+# Capture, sync, report, and key management all live here.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${SCRIPT_DIR}/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON=python3  # fallback for environments without the project venv
+fi
+PYTHONPATH="$SCRIPT_DIR" exec "$PYTHON" -m laptop "$@"

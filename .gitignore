@@ -1,0 +1,39 @@
+# Secrets and user data: never commit. Keep this block first.
+# NOTE: git has no trailing-line comments — every comment gets its own line.
+
+.env
+
+# mTLS CA, server and client private keys.
+# Ignore the CONTENTS, not the directory itself: git cannot re-include a file
+# inside an excluded directory, and .gitkeep must survive so a fresh clone has
+# somewhere for `counselog certs init` to write.
+certs/*
+!certs/.gitkeep
+*.pem
+*.key
+*.crt
+*.p12
+
+# DEK wrappers: no plaintext secrets, but per-install and not shareable
+keyring.json
+
+# SQLCipher databases and their journals
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[codz]
+*.so
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
