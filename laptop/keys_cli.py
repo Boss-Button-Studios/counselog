@@ -8,53 +8,29 @@ refusing and explaining (Guideline 2).
 
 from __future__ import annotations
 
+import shutil
+import time
+
 import click
 
 from datetime import datetime
 
-from core.crypto import (
-    FactorUnavailable,
-    Keyring,
-    KeyringError,
-    PasswordFactor,
-    UnlockFailed,
-    YubiKeyFactor,
-    new_dek,
-)
-from core.paths import keyring_path
+from core import db
+from core.crypto import FactorUnavailable, Keyring, KeyringError, new_dek
+from core.paths import keyring_path, notes_db_path
+from laptop.unlock import FACTOR_CHOICES, build_factor, load_keyring, unlock_dek
 
-FACTOR_CHOICES = ("yubikey", "password")
+def _ways(count: int) -> str:
+    """'1 way' / '2 ways' — small thing, but it reads as broken otherwise."""
+    return f"{count} way" if count == 1 else f"{count} ways"
 
 
-def _build_factor(kind: str, *, confirm_password: bool = False) -> object:
-    """Turn a factor name into a usable factor, prompting if needed."""
-    if kind == "yubikey":
-        return YubiKeyFactor()
-    password = click.prompt(
-        "Password", hide_input=True, confirmation_prompt=confirm_password
-    )
-    return PasswordFactor(password)
-
-
-def _unlock(ring: Keyring, kind: str | None) -> bytes:
-    """Recover the DEK, trying the most convenient factor first.
-
-    With a key plugged in this should be touch-and-go; the password only comes
-    up if there is no key, or the user asks for it.
-    """
-    registered = {w.factor for w in ring.wrappers}
-    order = [kind] if kind else [k for k in FACTOR_CHOICES if k in registered]
-
-    last_error: Exception | None = None
-    for candidate in order:
-        try:
-            return ring.unlock(_build_factor(candidate))
-        except (UnlockFailed, FactorUnavailable) as exc:
-            last_error = exc
-            if kind:  # user named a factor explicitly; do not silently fall back
-                break
-            click.echo(f"  {candidate}: {exc}", err=True)
-    raise click.ClickException(str(last_error) if last_error else "Could not unlock.")
+def _friendly_date(iso: str) -> str:
+    """Render a stored timestamp for a person, not for a parser."""
+    try:
+        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return iso  # never let an odd timestamp break the listing
 
 
 @click.group("keys")
@@ -84,7 +60,7 @@ def init(factor: str, label: str | None) -> None:
     try:
         wrapper = ring.add(
             new_dek(),
-            _build_factor(factor, confirm_password=True),
+            build_factor(factor, confirm_password=True),
             label or f"first {factor}",
         )
     except FactorUnavailable as exc:
@@ -112,16 +88,16 @@ def add(factor: str, label: str | None, unlock_with: str | None) -> None:
     a second time. You must already be able to unlock — you cannot add a key
     without proving you hold one.
     """
-    ring = _load()
+    ring = load_keyring()
     click.echo("First, unlock with a key you already have.")
-    dek = _unlock(ring, unlock_with)
+    dek = unlock_dek(ring, unlock_with)
 
     if factor == "yubikey":
         click.echo("Now plug in the NEW YubiKey (and only that one).")
         click.confirm("Ready?", default=True, abort=True)
 
     try:
-        wrapper = ring.add(dek, _build_factor(factor, confirm_password=True),
+        wrapper = ring.add(dek, build_factor(factor, confirm_password=True),
                            label or f"{factor} added later")
     except FactorUnavailable as exc:
         raise click.ClickException(str(exc)) from exc
@@ -146,7 +122,7 @@ def _friendly_date(iso: str) -> str:
 @keys.command("list")
 def list_keys() -> None:
     """Show every registered way into your notes."""
-    ring = _load()
+    ring = load_keyring()
     click.echo(f"{'ID':<18}{'TYPE':<11}{'REGISTERED':<18}LABEL")
     for wrapper in ring.wrappers:
         registered = _friendly_date(wrapper.created_at)
@@ -168,7 +144,7 @@ def revoke(wrapper_id: str) -> None:
     of the database, removing the wrapper does not protect that data — only
     rotating the database key does.
     """
-    ring = _load()
+    ring = load_keyring()
     match = next((w for w in ring.wrappers if w.id == wrapper_id), None)
     if match is None:
         raise click.ClickException(f"No registered key with id {wrapper_id!r}.")
@@ -200,13 +176,78 @@ def test_unlock(factor: str | None) -> None:
     Worth running after registering a backup key, while the original is still in
     your hand — that is the moment a mistake is still cheap to fix.
     """
-    ring = _load()
-    dek = _unlock(ring, factor)
+    ring = load_keyring()
+    dek = unlock_dek(ring, factor)
     click.secho(f"Unlocked. Recovered a {len(dek)}-byte key.", fg="green")
 
+@keys.command("rotate")
+@click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None,
+              help="Which registered factor to unlock with.")
+def rotate(unlock_with: str | None) -> None:
+    """Replace the key your notes are encrypted with.
 
-def _load() -> Keyring:
+    Use this when a key might have been copied, rather than merely lost.
+    Revoking stops a key working from now on; rotating actually re-encrypts the
+    notes, so an old copy of the database becomes unreadable too.
+
+    Every registered key and password must be to hand, because each one has to
+    be re-registered against the new key. A YubiKey left in a drawer would
+    otherwise be locked out.
+    """
+    ring = load_keyring()
+    path = notes_db_path()
+
+    click.echo("Rotating replaces the key your notes are encrypted with.")
+    click.echo(f"You will need every registered key and password: {len(ring)} in total.")
+    for wrapper in ring.wrappers:
+        click.echo(f"  - {wrapper.factor}: {wrapper.label}")
+    click.echo()
+    click.secho("The desktop's copy of your notes will stop opening until the next "
+                "sync re-sends the new key.", fg="yellow")
+    click.confirm("Continue?", abort=True)
+
+    dek = unlock_dek(ring, unlock_with)
     try:
-        return Keyring.load(keyring_path())
-    except KeyringError as exc:
+        conn = db.connect(path, dek) if path.exists() else None
+    except db.DatabaseError as exc:
         raise click.ClickException(str(exc)) from exc
+
+    # Collect every factor first. Nothing is changed until all of them answer,
+    # so a key that is not present aborts while everything still works.
+    factors = {}
+    for kind in sorted({w.factor for w in ring.wrappers}):
+        click.echo(f"\nRe-registering your {kind}.")
+        factors[kind] = build_factor(kind, confirm_password=(kind == "password"))
+
+    backup = keyring_path().with_suffix(f".json.before-rotation-{int(time.time())}")
+    shutil.copy2(keyring_path(), backup)
+
+    new_key = new_dek()
+    try:
+        ring.rewrap_all(new_key, factors)          # in memory; fails safely
+        if conn is not None:
+            db.rekey(conn, new_key)                # database now needs new_key
+        ring.save()                                # keyring now matches
+    except Exception as exc:
+        raise click.ClickException(
+            f"Rotation failed: {exc}\n"
+            f"Your previous keyring was copied to {backup} before anything changed. "
+            "If your notes will not open, restore that file."
+        ) from exc
+    finally:
+        if conn is not None:
+            conn.close()
+
+    if conn is not None:
+        try:
+            db.connect(path, new_key).close()
+        except db.DatabaseError as exc:
+            raise click.ClickException(
+                f"Rotation finished but the database did not reopen: {exc}\n"
+                f"Restore {backup} over {keyring_path()} and try again."
+            ) from exc
+
+    click.secho("Rotated.", fg="green")
+    click.echo(f"All {len(ring)} keys re-registered against the new key.")
+    click.echo(f"A copy of the old keyring is at {backup} — delete it once you have")
+    click.echo("confirmed everything opens, since it can still unwrap the old key.")

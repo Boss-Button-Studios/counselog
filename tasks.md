@@ -21,7 +21,7 @@ and recency). Everything else deferred until real notes exist to design against.
 |---|---|---|
 | Phase 0 — Scaffold | ✅ Complete | desktop |
 | Phase 1 — Crypto core | ✅ Complete (53 tests, 89% cov) | desktop (password + stub) |
-| Phase 2 — Storage + hash chain | ⬜ Not started | desktop |
+| Phase 2 — Storage + hash chain | ✅ Complete (131 tests, 89% cov) | desktop |
 | Phase 3 — Transport + mirror | ⬜ Not started | desktop (loopback) |
 | Phase 4 — Bin tagging | ⬜ Not started | desktop |
 | Phase 5 — Reports + dashboard | ⬜ Not started | desktop |
@@ -129,28 +129,67 @@ installs pyscard regardless. Confirmed importable with only `cryptography` and
 uncovered block. It cannot be exercised without a physical key — first real run
 happens on the laptop.
 
-## Phase 2 — Storage + hash chain
+## Phase 2 — Storage + hash chain ✅
 
-`core/db.py`, `models.py`, `sanitize.py`, `chain.py`; `counselog init`, `note`,
-`import`, `people`, `verify`.
+`core/{db,models,chain,sanitize,paths}.py`, `laptop/{notes,people,unlock}_cli.py`.
+Commands: `init`, `note`, `import`, `verify`, `forget`, `people add|list|remove`,
+and `keys rotate` (held back from phase 1 until it could re-key the database in
+the same operation).
 
-- Schema per spec §5, plus `note_chain`, `signatures`, and
-  `notes.source_trust`. `bins` uses kind + optional person FK with partial
-  unique indexes, so `self`/`team` need no fake person rows.
-- `captured_at` immutability enforced by a trigger raising `ABORT`, not by
-  convention.
-- Sanitizer: strip Unicode `Cf` and `Cc` (keeping `\n`, `\t`), normalize NFC.
-  Runs at ingestion, before the chain hash, so the hashed form is the stored
-  form.
-- **Hash chain must land with the first note.** `entry_hash = SHA256(prev_hash
-  || canonical(note))` in its own table. A chain says nothing about history
-  written before it started, and unlike signing it cannot be retrofitted.
-- Deletes are tombstones: body cleared, chain entry preserved.
+**Design decisions and findings:**
 
-Tests: canonical form stable across processes; a mutated body breaks the walk at
-the right sequence; an inserted row breaks it; a tombstone does not;
-`UPDATE notes SET captured_at` raises; singleton bin constraints hold;
-sanitizer fixtures with real ZWJ, BOM and RLO characters.
+1. **The chain hash is split in two: `body_hash` and `entry_hash`.** This was not
+   in the plan and is load-bearing. `entry_hash = SHA256(prev_hash || body_hash)`.
+   With a single combined hash, tombstoning — which deliberately destroys a body
+   — would make that entry unrecomputable, so *every* tombstone would look
+   exactly like tampering. Splitting them means a cleared note loses only the
+   proof about its own text, while the sequence around it stays fully
+   verifiable. Honouring a deletion request no longer destroys the evidence for
+   everything else.
+
+2. **Verification cross-checks notes against the chain, not just the chain.**
+   Found while writing the tests: walking the chain alone never visits a note
+   inserted straight into the `notes` table, so fabricated notes could be
+   appended and still verify clean. History could not be *altered*, but it could
+   be *added to*. `verify_chain` now reports any note no entry covers. Both
+   attacks are tested end-to-end against a real encrypted database.
+
+3. **Canonical form is length-prefixed, not delimited.** Four bytes of length in
+   front of each field, so no note can be re-split at different boundaries to
+   collide with another. Versioned in the hashed bytes, so a future change to
+   the serialization cannot silently invalidate an old chain.
+
+4. **Deletion is impossible at the database level.** A `BEFORE DELETE` trigger on
+   `notes` refuses outright, and `note_chain` refuses both UPDATE and DELETE.
+   Clearing text goes through `forget`, which tombstones. Tombstoning a
+   fabricated note does *not* launder it — tested.
+
+5. **`captured_at` immutability is a trigger, not a convention**, and it is
+   narrow: `processed` and the tagging fields still update freely.
+
+6. **Sanitization runs before hashing**, so the chain covers exactly what is
+   stored. When it changes pasted text the CLI says so — silently altering a
+   note the user pasted would be worse than not altering it (Law 6).
+
+7. **`verify` states its own limits in its output.** A clean result says the
+   notes are unaltered, then says plainly that this does not show what they say
+   is true, nor exactly when events happened. The tool must not let a green tick
+   imply more than it proves.
+
+8. **Rotation is guarded.** Every registered factor must be present before
+   anything changes; the old keyring is copied aside first; the database is
+   reopened with the new key to confirm before reporting success; and the user
+   is warned both that the desktop mirror will stop opening until the next sync,
+   and that the backup keyring can still unwrap the old key and should be
+   deleted.
+
+9. **`--third-party` on import** sets `source_trust`, so the stronger
+   sanitization of spec §10 can be applied later without guessing which notes
+   were which.
+
+**Deferred deliberately:** an orphaned note is *detected* but cannot be
+*attributed* — the chain proves it was not recorded, not who added it. Signing
+(phase 7) is what closes that.
 
 ## Phase 3 — Transport + mirror
 

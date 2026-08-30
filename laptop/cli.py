@@ -8,6 +8,8 @@ report/dash in phase 5; ui in phase 6.
 import click
 
 from laptop.keys_cli import keys
+from laptop.notes_cli import forget, import_file, init, note, verify
+from laptop.people_cli import people
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -17,6 +19,12 @@ def cli() -> None:
 
 
 cli.add_command(keys)
+cli.add_command(people)
+cli.add_command(init)
+cli.add_command(note)
+cli.add_command(import_file)
+cli.add_command(verify)
+cli.add_command(forget)
 
 
 @cli.command()
@@ -32,4 +40,6 @@ def status() -> None:
     except KeyringError:
         click.echo("Keyring:         not set up — run `counselog keys init`")
     exists = notes_db_path().exists()
-    click.echo(f"Notes database:  {'present' if exists else 'not created yet (phase 2)'}")
+    click.echo(f"Notes database:  {'present' if exists else 'not created yet'}")
+    if not exists:
+        click.echo("                 run `counselog init`")
