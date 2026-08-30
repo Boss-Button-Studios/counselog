@@ -24,6 +24,9 @@ PASSWORD = "swordfish"
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    # Point at a settings file that does not exist, so a real .env on this
+    # machine cannot change what these tests see.
+    monkeypatch.setenv("COUNSELOG_ENV_FILE", str(tmp_path / "absent.env"))
     monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "data"))
     monkeypatch.setenv("COUNSELOG_CERTS", str(tmp_path / "certs"))
     monkeypatch.setenv("COUNSELOG_DESKTOP_HOST", "localhost")

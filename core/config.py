@@ -21,6 +21,15 @@ LOOPBACK_IPS = ("127.0.0.1",)
 
 
 def _env_file() -> Path:
+    """The settings file.
+
+    COUNSELOG_ENV_FILE overrides it. The tests point that at a path that does
+    not exist, so a real .env on a developer's machine cannot leak into them and
+    make results depend on who is running them (Law 7).
+    """
+    override = os.environ.get("COUNSELOG_ENV_FILE")
+    if override:
+        return Path(override).expanduser()
     return Path(__file__).resolve().parent.parent / ".env"
 
 
