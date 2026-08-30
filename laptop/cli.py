@@ -10,6 +10,7 @@ import click
 from laptop.keys_cli import keys
 from laptop.notes_cli import forget, import_file, init, note, verify
 from laptop.people_cli import people
+from laptop.transport_cli import certs, doctor, sync
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -25,6 +26,9 @@ cli.add_command(note)
 cli.add_command(import_file)
 cli.add_command(verify)
 cli.add_command(forget)
+cli.add_command(certs)
+cli.add_command(doctor)
+cli.add_command(sync)
 
 
 @cli.command()

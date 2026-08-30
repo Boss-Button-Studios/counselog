@@ -22,7 +22,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 0 — Scaffold | ✅ Complete | desktop |
 | Phase 1 — Crypto core | ✅ Complete (53 tests, 89% cov) | desktop (password + stub) |
 | Phase 2 — Storage + hash chain | ✅ Complete (131 tests, 89% cov) | desktop |
-| Phase 3 — Transport + mirror | ⬜ Not started | desktop (loopback) |
+| Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ⬜ Not started | desktop |
 | Phase 5 — Reports + dashboard | ⬜ Not started | desktop |
 | Phase 6 — Flask read UI | ⬜ Not started | desktop |
@@ -191,27 +191,66 @@ the same operation).
 *attributed* — the chain proves it was not recorded, not who added it. Signing
 (phase 7) is what closes that.
 
-## Phase 3 — Transport + mirror
+## Phase 3 — Transport + mirror ✅
 
-`certs init`, `desktop/service.py`, `laptop/client.py`, `desktop/mirror.py`,
-`doctor`, loopback mode.
+`core/{certs,config,protocol}.py`, `desktop/{service,sessions,mirror}.py`,
+`desktop/__main__.py`, `laptop/{client,transport_cli}.py`, `.env.example`.
+Commands: `certs init|enroll`, `doctor`, `sync`.
 
-- Local CA plus server and per-device client certs via `cryptography`'s X.509
-  builder. Mutual TLS, CA pinned both sides. Server cert SANs carry both the
-  tailnet MagicDNS name and the `100.x` address.
-- Addresses in a gitignored `.env` (`COUNSELOG_DESKTOP_HOST`, `COUNSELOG_BIND`),
-  never in source — the repo should be publishable without leaking topology.
-- Bind to the tailnet interface, never `0.0.0.0`. Per-device client certs, not
-  one shared cert, because §10's multi-device capture opens exactly this seam.
-- `POST /session` carries the DEK; desktop holds it in memory with a TTL,
-  returns a `session_id`; `DELETE /session/<id>` on exit. Nothing key-shaped
-  ever touches the desktop's disk.
-- **Loopback mode:** both halves on 127.0.0.1 against two separate DB files, so
-  sync is testable here without the laptop awake.
+**Verified on this machine, in loopback:** `doctor` reports each step
+separately; `sync` moved notes into the mirror; the mirror on disk has no SQLite
+header and no note text; the mirror's chain reproduces the laptop's hashes
+exactly; a certificate from a different authority is refused at the handshake;
+and after restarting the service, `/mirror/status` and `/sync` both refuse
+without a fresh session — the borrowed key did not survive.
 
-Tests: handshake succeeds with the right CA, refused with a foreign client cert;
-expired session rejected; sync idempotent on replay; DEK absent from disk after
-a service restart.
+**Bugs found and fixed while building:**
+
+1. **The shutdown handler deadlocked.** `server.shutdown()` blocks until
+   `serve_forever()` returns, and it was being called from a signal handler
+   running on that same thread. The service ignored SIGTERM and had to be
+   killed outright — which matters because the shutdown path is what discards
+   the borrowed keys, so they stayed in memory until SIGKILL. Now both steps run
+   on a separate thread; verified exiting in about a second, with the keys
+   dropped.
+
+2. **`doctor` hung for 30 seconds** against a port that accepts a connection but
+   never completes a handshake. It now uses a 5-second timeout: doctor is what
+   you run when something is already wrong.
+
+**Design decisions:**
+
+3. **A note travels with its chain entry, and the desktop recomputes the hash
+   before storing anything** (`NotePayload.verify_self_consistency`). A mirror
+   that accepted a note not matching its entry would be a mirror of something
+   that never existed. Tombstoned notes skip the body check — their text was
+   destroyed deliberately — but their link is still checked, the same split the
+   local chain uses.
+
+4. **Batches are all-or-nothing and must be contiguous.** A partially applied
+   batch would leave a gap in the mirror's chain, which is indistinguishable
+   from tampering ever after. Re-sending is a no-op, so an interrupted sync is
+   safe to simply run again.
+
+5. **Sessions are bound to the client certificate.** A session id leaked to
+   another enrolled device does not work there — the certificate and the
+   session must agree, and a mismatch is refused without confirming the session
+   exists.
+
+6. **The server certificate always covers loopback**, so the development mode
+   needs no configuration. Mutual TLS is the real gate, not the name in the
+   certificate, so a generous SAN list costs nothing and removes a class of
+   confusing handshake failures.
+
+7. **Per-device client certificates from the start**, with `certs enroll` for
+   the next one. Spec §10's multi-device capture opens exactly this seam, and a
+   shared certificate would mean revoking one device revokes them all.
+
+8. **`COUNSELOG_CERTS` overrides the certificate location**, which the tests use
+   so they never write into the repo.
+
+9. **Errors never echo internals to the wire.** The 500 handler returns a fixed
+   sentence: an exception message could carry a path, a query, or note text.
 
 ## Phase 4 — Bin tagging
 
