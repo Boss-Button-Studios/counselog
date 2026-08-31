@@ -208,3 +208,36 @@ def test_sync_needs_a_database(run, live_desktop):
     result = run(["sync", "--loopback", "--unlock-with", "password"], stdin=f"{PASSWORD}\n")
     assert result.exit_code != 0
     assert "counselog init" in result.output
+
+
+# ── version mismatch ─────────────────────────────────────────────────────────
+#
+# A service left running across an update keeps serving the endpoints it started
+# with. This happened on a real machine: the laptop called /tag against a
+# desktop still running the previous build and got "No such endpoint", which
+# points at nothing useful.
+
+
+def test_doctor_reports_an_out_of_date_desktop(with_notes, live_desktop, monkeypatch):
+    from desktop import service
+    monkeypatch.setattr(service, "SERVICE_VERSION", 1)
+    result = with_notes(["doctor", "--loopback"])
+    assert result.exit_code != 0
+    assert "restart counselogd" in result.output
+
+
+def test_sync_refuses_against_an_out_of_date_desktop(with_notes, live_desktop, monkeypatch):
+    """Better to stop before opening a session than to fail mid-way."""
+    from desktop import service
+    monkeypatch.setattr(service, "SERVICE_VERSION", 1)
+    result = with_notes(["sync", "--loopback", "--unlock-with", "password"],
+                        stdin=f"{PASSWORD}\n")
+    assert result.exit_code != 0
+    assert "older version" in result.output
+    assert "./counselogd" in result.output
+
+
+def test_doctor_passes_when_versions_match(with_notes, live_desktop):
+    result = with_notes(["doctor", "--loopback"])
+    assert result.exit_code == 0
+    assert "up to date" in result.output

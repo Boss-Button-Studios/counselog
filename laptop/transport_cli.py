@@ -17,7 +17,7 @@ from core.certs import (
     issue_client,
     issue_server,
 )
-from laptop.client import DesktopClient, TransportError
+from laptop.client import REQUIRED_SERVICE_VERSION, DesktopClient, TransportError
 from laptop.unlock import FACTOR_CHOICES, load_keyring, unlock_dek
 
 
@@ -115,7 +115,12 @@ def doctor(loopback: bool, device: str) -> None:
     click.echo(f"\nDesktop at {client.base_url}")
     try:
         health = client.health()
-        _line("reachable", True, f"service v{health['service_version']}")
+        running = health.get("service_version", 0)
+        current = running >= REQUIRED_SERVICE_VERSION
+        _line("reachable", True, f"service v{running}")
+        _line("up to date", current,
+              "" if current else f"needs v{REQUIRED_SERVICE_VERSION} — restart counselogd there")
+        ok &= current
         _line("mutual TLS", True, f"it sees us as '{health['device']}'")
         if health["device"] != device:
             click.secho(f"  note: the desktop reads our certificate as "
@@ -170,6 +175,7 @@ def sync(loopback: bool, unlock_with: str | None) -> None:
 
     session_id = None
     try:
+        client.require_current()
         session_id = client.open_session(dek)
         status = client.mirror_status(session_id)
         pending = mirror.to_payloads(conn, after_seq=status["head_seq"])

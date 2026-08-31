@@ -26,7 +26,12 @@ from desktop.sessions import NoSuchSession, SessionStore
 
 log = logging.getLogger("counselogd")
 
-SERVICE_VERSION = 1
+# Bump whenever the set of endpoints changes. The laptop compares this against
+# what it needs, so a desktop still running older code says so plainly instead
+# of answering "No such endpoint" to a request it has never heard of.
+#   1: session, sync, mirror/status   (phase 3)
+#   2: + people, tag                  (phase 4)
+SERVICE_VERSION = 2
 
 
 def _device() -> str:

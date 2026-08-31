@@ -65,6 +65,7 @@ def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None) 
                    "so stopping early keeps whatever is done.")
         click.echo()
 
+        client.require_current()
         session_id = client.open_session(dek)
         client.send_people(session_id, [
             _person_payload(person) for person in models.list_people(conn, include_inactive=True)

@@ -17,9 +17,21 @@ from core.certs import CertificateError, CertPaths, client_context, default_path
 
 DEFAULT_TIMEOUT = 30.0
 
+# What this build of the laptop code expects the desktop to be able to do.
+# Raised alongside SERVICE_VERSION in desktop/service.py.
+REQUIRED_SERVICE_VERSION = 2
+
 
 class TransportError(Exception):
     """The desktop could not be reached, or refused the request."""
+
+
+class DesktopOutOfDate(TransportError):
+    """The desktop is running an older build than this command needs.
+
+    Its own class because the fix is specific and easy — restart the service —
+    and quite different from a network problem.
+    """
 
 
 @dataclass
@@ -72,6 +84,24 @@ class DesktopClient:
 
     def health(self) -> dict[str, Any]:
         return self._request("GET", "/health")
+
+    def require_current(self, needed: int = REQUIRED_SERVICE_VERSION) -> dict[str, Any]:
+        """Check the desktop can do what we are about to ask of it.
+
+        A service left running across an update serves the endpoints it started
+        with. Without this check the first sign of trouble is "No such
+        endpoint", which points at nothing useful.
+        """
+        health = self.health()
+        running = health.get("service_version", 0)
+        if not isinstance(running, int) or running < needed:
+            raise DesktopOutOfDate(
+                f"The desktop is running an older version of counselogd "
+                f"(version {running}; this needs {needed}). It was probably "
+                f"started before the last update. Restart it on the desktop:\n"
+                f"    ./counselogd"
+            )
+        return health
 
     def open_session(self, dek: bytes) -> str:
         """Lend the desktop the database key for one session.
