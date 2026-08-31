@@ -23,7 +23,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 1 — Crypto core | ✅ Complete (53 tests, 89% cov) | desktop (password + stub) |
 | Phase 2 — Storage + hash chain | ✅ Complete (131 tests, 89% cov) | desktop |
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
-| Phase 4 — Bin tagging | ⬜ Not started | desktop |
+| Phase 4 — Bin tagging | ✅ Complete (231 tests, 90% cov) | desktop |
 | Phase 5 — Reports + dashboard | ⬜ Not started | desktop |
 | Phase 6 — Flask read UI | ⬜ Not started | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
@@ -252,25 +252,84 @@ without a fresh session — the borrowed key did not survive.
 9. **Errors never echo internals to the wire.** The 500 handler returns a fixed
    sentence: an exception message could carry a path, a query, or note text.
 
-## Phase 4 — Bin tagging
+## Phase 4 — Bin tagging ✅
 
-`desktop/tagger.py`; `counselog sync`, `review`.
+`desktop/tagger.py`, `laptop/tag_cli.py`, `/people` and `/tag` endpoints,
+protocol support for people and tags, bin-key mapping and tag storage in
+`core/models.py`. Commands: `tag`, `review`.
 
-- Stage 1: deterministic alias match against `people.aliases`, word-boundary and
-  case-insensitive. Hits get `confidence = 1.0` and never reach the model.
-- Stage 2: Ollama `/api/chat` with `format` set to a JSON Schema whose `bin`
-  field is an enum of real bin keys, so the model cannot invent one.
-  `temperature: 0`, fixed seed (Law 7).
-- Benchmark `gemma4:12b` against `llama3.1:8b` on real tagging prompts before
-  picking a default. Model name stays config.
-- Tags below `auto_accept_threshold` (default 0.75) are surfaced by
-  `counselog review`. Tags sit outside the chained body, so re-tagging never
-  disturbs the chain.
-- `sync` prints a one-line disclosure of what goes where, every time (Law 2).
+### Model benchmark (measured on this desktop, not assumed)
 
-Tests: alias matcher against a stub `people` table; Ollama client against a
-local stub server asserting the schema is sent and an out-of-enum bin rejected.
-No live model in unit tests.
+Five hand-labelled notes, warm models, schema-constrained output:
+
+| model | correct | seconds/note |
+|---|---|---|
+| phi3:mini | 2/5 | 1.9 |
+| llama3.1:8b | 2/5 | 2.7 |
+| mistral:7b | 2/5 | 3.6 |
+| deepseek-r1:7b | 3/5 | 53.8 |
+| **deepseek-r1:14b** | **4/5** | **87.6** |
+
+The reasoning models are 20-30x slower and substantially better. The small ones
+were biased toward answering yes to everything — llama3.1:8b tagged "Tom asked
+for Friday off" as `team`. Default is now `deepseek-r1:14b`, matching what
+Charlotte found; the model name stays config.
+
+The accuracy column is directional, not a score: the labels are one person's
+reading of what "self" and "team" mean, and at least two of the five are
+arguable. Real notes are the real test.
+
+### The question put to the model got smaller
+
+First attempt asked the model to choose from *all* bins. That took 47-294
+seconds per note and produced confident nonsense — an 8B model tagged a note
+with a person who was never mentioned in it. Aliases already resolve people
+exactly, so the model is now asked only what aliases cannot answer: is this
+about you, or about the team as a whole? Smaller question, far more reliable.
+
+Verified end to end against the live model: 4/4 notes tagged correctly, two of
+them by alias alone at no model cost.
+
+### Bugs found and fixed while building
+
+1. **Batching discarded everything on interruption.** Tagging all notes in one
+   request meant ten minutes of model work was lost when the connection
+   dropped, with no output the whole time. Now one note per request, results
+   saved as they arrive, live progress, and `tag` resumes where it stopped.
+
+2. **A long run expired its own session.** Tagging 20 notes takes far longer
+   than the 15-minute idle timeout. Sessions now renew on use — but with an
+   absolute one-hour cap, so renewal extends an active session rather than
+   making a borrowed key immortal.
+
+3. **A test called the real model** and hung the suite. An autouse fixture now
+   makes any unstubbed call fail loudly instead.
+
+4. **Progress output used a carriage return unconditionally**, which is right in
+   a terminal and a mess in a log. It now checks for a tty.
+
+### Design decisions
+
+5. **Exact matches record no confidence at all** (NULL), which is exactly what
+   spec §5 describes. Only model guesses carry a number, so `review` stays short
+   enough to actually work through — names that are literally present are never
+   second-guessed.
+
+6. **The model runs even when a name matched.** A note can name someone *and* be
+   about the team; skipping the second question whenever a name appeared would
+   silently lose that.
+
+7. **Tags travel by stable key** (`self`, `team`, `person:<id>`), never by bin
+   id, because ids are auto-increment and may legitimately differ between the
+   laptop and the mirror.
+
+8. **Re-tagging replaces rather than accumulates**, so correcting an alias and
+   running again converges. Tags sit outside the hashed note body, so none of
+   this disturbs the chain — tested.
+
+9. **A nonsense confidence falls back below the threshold.** A model returning 7
+   has misunderstood the question, and treating that as certainty would
+   auto-accept a tag nobody checked.
 
 ## Phase 5 — Reports + dashboard
 

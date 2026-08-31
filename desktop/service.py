@@ -18,10 +18,10 @@ from typing import Callable
 import sqlcipher3
 from flask import Flask, g, jsonify, request
 
-from core import config, db, protocol
+from core import config, db, models, protocol
 from core.certs import peer_name
 from core.paths import mirror_db_path
-from desktop import mirror
+from desktop import mirror, tagger
 from desktop.sessions import NoSuchSession, SessionStore
 
 log = logging.getLogger("counselogd")
@@ -150,6 +150,78 @@ def create_app(sessions: SessionStore | None = None) -> Flask:
             return jsonify(head_seq=mirror.head_seq(conn), notes=notes, verified=result.ok)
         finally:
             conn.close()
+
+    @app.post("/people")
+    @requires_session
+    def receive_people():
+        """Take the laptop's list of people, so tagging can match names.
+
+        The mirror never invents people; it only ever receives them, keeping the
+        laptop the single source of truth for who is on the team.
+        """
+        try:
+            people = protocol.parse_people(g.payload.get("people"))
+        except protocol.ProtocolError as exc:
+            return jsonify(error=str(exc)), 400
+
+        conn = open_mirror()
+        try:
+            for person in people:
+                models.upsert_person(conn, person.person_id, person.display_name,
+                                     person.aliases, person.active, person.created_at)
+        finally:
+            conn.close()
+        return jsonify(stored=len(people))
+
+    @app.post("/tag")
+    @requires_session
+    def tag():
+        """Work out which bins some notes belong to.
+
+        Deliberately takes a list of note ids rather than a batch of text: the
+        notes are already here, and re-sending their content would put it on the
+        wire a second time for no reason.
+
+        One note at a time, because the model is slow enough that a failure part
+        way through a batch should not discard the work already done.
+        """
+        note_ids = g.payload.get("note_ids")
+        if not isinstance(note_ids, list) or len(note_ids) > 100:
+            return jsonify(error="'note_ids' must be a list of at most 100 ids."), 400
+        model = g.payload.get("model") or tagger.DEFAULT_MODEL
+        if not isinstance(model, str) or len(model) > 128:
+            return jsonify(error="'model' must be a model name."), 400
+
+        conn = open_mirror()
+        try:
+            people = tagger.people_from_rows(
+                conn.execute("SELECT id, display_name, aliases FROM people WHERE active = 1")
+            )
+            results: dict[str, list[dict]] = {}
+            failed: dict[str, str] = {}
+            for raw_id in note_ids:
+                if not isinstance(raw_id, int) or isinstance(raw_id, bool):
+                    return jsonify(error="Note ids must be whole numbers."), 400
+                row = conn.execute(
+                    "SELECT raw_text, tombstoned_at FROM notes WHERE id = ?", (raw_id,)
+                ).fetchone()
+                if row is None or row["tombstoned_at"] is not None:
+                    continue  # nothing to read
+                try:
+                    tags = tagger.tag_note(row["raw_text"], people, model=model)
+                except tagger.TaggingUnavailable as exc:
+                    # Report and stop: every remaining note would fail the same
+                    # way, and the laptop keeps whatever already succeeded.
+                    failed[str(raw_id)] = str(exc)
+                    break
+                results[str(raw_id)] = [
+                    {"bin": tag.bin_key, "confidence": tag.confidence} for tag in tags
+                ]
+        finally:
+            conn.close()
+
+        log.info("tagged %s notes for %s", len(results), _device())
+        return jsonify(tags=results, failed=failed, model=model)
 
     @app.errorhandler(404)
     def not_found(_):

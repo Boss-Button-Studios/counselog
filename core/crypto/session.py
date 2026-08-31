@@ -15,7 +15,12 @@ from __future__ import annotations
 import time
 from types import TracebackType
 
-DEFAULT_TTL_SECONDS = 900  # 15 minutes
+DEFAULT_TTL_SECONDS = 900  # 15 minutes of inactivity
+
+# However much work is in flight, a borrowed key is handed back eventually.
+# Without this, renewing on every use would let a busy session live forever,
+# which is exactly the property the TTL exists to prevent.
+MAX_LIFETIME_SECONDS = 3600  # 1 hour
 
 
 class SessionExpired(Exception):
@@ -36,14 +41,17 @@ class DekSession:
     defences are the TTL, and never writing the key to disk.
     """
 
-    def __init__(self, dek: bytes, ttl_seconds: float = DEFAULT_TTL_SECONDS) -> None:
+    def __init__(self, dek: bytes, ttl_seconds: float = DEFAULT_TTL_SECONDS,
+                 max_lifetime: float = MAX_LIFETIME_SECONDS) -> None:
         if ttl_seconds <= 0:
             raise ValueError("A session TTL must be positive.")
         # bytearray, not bytes: immutable bytes cannot be overwritten in place.
         self._buffer = bytearray(dek)
         self._ttl = float(ttl_seconds)
         # Monotonic, so a clock change cannot extend a session.
-        self._expires_at = time.monotonic() + self._ttl
+        started = time.monotonic()
+        self._expires_at = started + self._ttl
+        self._deadline = started + max(float(max_lifetime), self._ttl)
         self._closed = False
 
     @property
@@ -62,7 +70,8 @@ class DekSession:
 
     @property
     def expired(self) -> bool:
-        return time.monotonic() >= self._expires_at
+        now = time.monotonic()
+        return now >= self._expires_at or now >= self._deadline
 
     @property
     def seconds_remaining(self) -> float:
@@ -75,7 +84,9 @@ class DekSession:
         if self.expired:
             self.close()
             raise SessionExpired("This session has expired. Unlock again.")
-        self._expires_at = time.monotonic() + self._ttl
+        # Never past the absolute deadline: renewal extends an active session,
+        # it does not make one immortal.
+        self._expires_at = min(time.monotonic() + self._ttl, self._deadline)
 
     def close(self) -> None:
         """Discard the key. Safe to call more than once."""

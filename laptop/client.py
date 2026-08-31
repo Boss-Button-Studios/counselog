@@ -98,6 +98,30 @@ class DesktopClient:
             "notes": [p.to_json() for p in payloads],
         })
 
+    def send_people(self, session_id: str, people: list[protocol.PersonPayload]) -> dict[str, Any]:
+        return self._request("POST", "/people", {
+            "session_id": session_id,
+            "people": [p.to_json() for p in people],
+        })
+
+    def tag(self, session_id: str, note_ids: list[int], *, model: str | None = None,
+            timeout: float | None = None) -> dict[str, Any]:
+        """Ask the desktop to tag some notes.
+
+        Needs its own timeout: a reasoning model takes over a minute per note on
+        a machine without a GPU, so the default would give up long before the
+        answer arrived.
+        """
+        previous, self.timeout = self.timeout, timeout or self.timeout
+        try:
+            return self._request("POST", "/tag", {
+                "session_id": session_id,
+                "note_ids": note_ids,
+                "model": model,
+            })
+        finally:
+            self.timeout = previous
+
 
 def _error_of(response: "httpx.Response") -> str:
     try:

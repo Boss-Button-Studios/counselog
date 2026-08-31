@@ -15,6 +15,7 @@ existed.
 from __future__ import annotations
 
 import base64
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -183,3 +184,100 @@ def decode_key(value: Any) -> bytes:
     if len(raw) != 32:
         raise ProtocolError("The key must be 32 bytes.")
     return raw
+
+# ── people and tags ──────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class PersonPayload:
+    """One person, as the desktop needs to see them.
+
+    The laptop's id travels with them, because 'person:<id>' is the bin key on
+    both machines and it has to mean the same thing on each.
+    """
+
+    person_id: int
+    display_name: str
+    aliases: tuple[str, ...]
+    active: bool
+    created_at: str
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "person_id": self.person_id,
+            "display_name": self.display_name,
+            "aliases": list(self.aliases),
+            "active": self.active,
+            "created_at": self.created_at,
+        }
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> "PersonPayload":
+        if not isinstance(data, Mapping):
+            raise ProtocolError("Each person must be an object.")
+        raw_aliases = data.get("aliases")
+        if not isinstance(raw_aliases, list) or len(raw_aliases) > 64:
+            raise ProtocolError("'aliases' must be a list of at most 64 names.")
+        aliases = []
+        for alias in raw_aliases:
+            if not isinstance(alias, str) or len(alias) > 128:
+                raise ProtocolError("Each alias must be text of at most 128 characters.")
+            aliases.append(alias)
+        active = data.get("active")
+        if not isinstance(active, bool):
+            raise ProtocolError("'active' must be true or false.")
+        return cls(
+            person_id=_integer(data, "person_id", minimum=1),
+            display_name=_string(data, "display_name", max_length=128),
+            aliases=tuple(aliases),
+            active=active,
+            created_at=_string(data, "created_at", max_length=64),
+        )
+
+
+def parse_people(data: Any) -> list[PersonPayload]:
+    if not isinstance(data, list):
+        raise ProtocolError("Expected a list of people.")
+    if len(data) > 500:
+        raise ProtocolError("Too many people in one request.")
+    return [PersonPayload.from_json(item) for item in data]
+
+
+BIN_KEY_PATTERN = re.compile(r"^(self|team|person:[1-9][0-9]{0,17})$")
+
+
+def parse_tags(data: Any) -> dict[int, list[tuple[str, float | None]]]:
+    """Read tagging results coming back from the desktop.
+
+    Bin keys are checked against a pattern rather than trusted: they are used to
+    look up a local bin, and an unexpected shape should be refused here rather
+    than discovered further in.
+    """
+    if not isinstance(data, Mapping):
+        raise ProtocolError("Expected an object of tags per note.")
+    result: dict[int, list[tuple[str, float | None]]] = {}
+    for raw_id, entries in data.items():
+        try:
+            note_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise ProtocolError(f"{raw_id!r} is not a note id.") from exc
+        if not isinstance(entries, list):
+            raise ProtocolError(f"Tags for note {note_id} must be a list.")
+        tags: list[tuple[str, float | None]] = []
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                raise ProtocolError("Each tag must be an object.")
+            key = _string(entry, "bin", max_length=32)
+            if not BIN_KEY_PATTERN.match(key):
+                raise ProtocolError(f"{key!r} is not a valid bin.")
+            confidence = entry.get("confidence")
+            if confidence is not None:
+                if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                    raise ProtocolError("'confidence' must be a number or null.")
+                confidence = float(confidence)
+                if not 0.0 <= confidence <= 1.0:
+                    raise ProtocolError("'confidence' must be between 0 and 1.")
+            tags.append((key, confidence))
+        result[note_id] = tags
+    return result
+

@@ -55,7 +55,13 @@ class SessionStore:
                 # Do not confirm the session exists to the wrong device.
                 raise NoSuchSession("No such session. Unlock and try again.")
             try:
-                return session.dek
+                key = session.dek
+                # Sliding expiry: tagging a batch of notes can take far longer
+                # than the idle timeout, and a session doing real work should
+                # not die mid-run. The absolute deadline still applies, so this
+                # cannot keep a key alive indefinitely.
+                session.renew()
+                return key
             except (SessionExpired, SessionClosed) as exc:
                 self._sessions.pop(session_id, None)
                 raise NoSuchSession(str(exc)) from exc

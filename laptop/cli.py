@@ -10,6 +10,7 @@ import click
 from laptop.keys_cli import keys
 from laptop.notes_cli import forget, import_file, init, note, verify
 from laptop.people_cli import people
+from laptop.tag_cli import review, tag
 from laptop.transport_cli import certs, doctor, sync
 
 
@@ -29,6 +30,8 @@ cli.add_command(forget)
 cli.add_command(certs)
 cli.add_command(doctor)
 cli.add_command(sync)
+cli.add_command(tag)
+cli.add_command(review)
 
 
 @cli.command()
