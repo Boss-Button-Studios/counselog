@@ -232,3 +232,47 @@ def test_review_can_be_stopped_part_way(ready, monkeypatch):
 def test_review_says_when_there_is_nothing_to_check(ready):
     result = ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\n")
     assert "Nothing to check" in result.output
+
+
+# ── progress display ─────────────────────────────────────────────────────────
+
+
+def test_no_escape_codes_leak_into_redirected_output(ready, monkeypatch):
+    """Progress overwrites its own line in a terminal, using an ANSI erase.
+
+    Redirected to a file or a pipe, that escape would be written literally and
+    the carriage return would jumble the line, so the in-place update must be
+    suppressed. Click's test runner is not a tty, which is the case tested here.
+    """
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    _note(ready, "Sarah pushed back on the Q3 timeline in standup this morning.")
+    output = _tag(ready).output
+    assert "\033" not in output
+    assert "[K" not in output
+    assert "\r" not in output
+
+
+def test_the_result_is_shown_on_its_own_line_when_redirected(ready, monkeypatch):
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    _note(ready, "Sarah was there.")
+    lines = [l for l in _tag(ready).output.splitlines() if "note 1" in l]
+    # One line announcing the note, one reporting what it was tagged with. Both
+    # name the note, so a log covering several notes stays readable.
+    assert len(lines) == 2
+    assert lines[1].strip().startswith("->")
+
+
+def test_a_note_that_matched_nothing_is_flagged(ready, monkeypatch):
+    """A note in no bin shows up in no report. Letting it pass silently would
+    lose it more thoroughly than a wrong guess would."""
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    _note(ready, "Something with no name and no obvious subject.")
+    output = _tag(ready).output
+    assert "no bin at all" in output
+    assert "will not show up in any report" in output
+
+
+def test_notes_that_matched_are_not_flagged(ready, monkeypatch):
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    _note(ready, "Sarah was there.")
+    assert "no bin at all" not in _tag(ready).output

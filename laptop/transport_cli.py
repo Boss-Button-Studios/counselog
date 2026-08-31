@@ -67,6 +67,11 @@ def certs_init(devices: tuple[str, ...], force: bool) -> None:
     click.secho("Copy these to each capture device:", bold=True)
     click.echo(f"  {paths.ca_cert.name}, <device>.crt, <device>.key")
     click.secho("Do not copy ca.key or server.key anywhere. They stay here.", fg="yellow")
+    click.echo()
+    click.echo("Once each device has its files, remove their private keys from this")
+    click.echo("machine — it has no use for them, and holding them means a break-in")
+    click.echo("here would hand over those devices' identities as well:")
+    click.echo("    counselog certs prune")
 
 
 @certs.command("enroll")
@@ -82,6 +87,44 @@ def certs_enroll(device: str) -> None:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Enrolled {device}.")
     click.echo(f"Copy {paths.ca_cert.name}, {device}.crt and {device}.key to that device.")
+
+
+@certs.command("prune")
+@click.option("--yes", is_flag=True, help="Do not ask.")
+def certs_prune(yes: bool) -> None:
+    """Delete other devices' private keys from this machine.
+
+    `certs init` generates each device's key here so it can be copied across.
+    Once it has been, this machine has no use for it — and keeping it means a
+    break-in here also yields that device's identity (Guideline 4: no more
+    access than the job needs).
+
+    The certificates themselves are left alone. They are public, and they are
+    what lets this machine recognise the device.
+    """
+    paths = default_paths()
+    own = {"ca", "server"}
+    strays = sorted(
+        path for path in paths.root.glob("*.key")
+        if path.stem not in own
+    )
+    if not strays:
+        click.echo("No other devices' private keys are stored here.")
+        return
+
+    click.echo("These private keys belong to other devices and are not needed here:")
+    for path in strays:
+        click.echo(f"  {path.name}")
+    click.echo()
+    click.secho("Make sure each device already has its own copy — this cannot be undone, "
+                "and a device without its key cannot connect.", fg="yellow")
+    if not yes:
+        click.confirm("Delete them?", abort=True)
+
+    for path in strays:
+        path.unlink()
+    click.echo(f"Deleted {len(strays)} private key(s). Their certificates remain, so this "
+               "machine can still recognise those devices.")
 
 
 @click.command("doctor")
@@ -121,7 +164,8 @@ def doctor(loopback: bool, device: str) -> None:
         _line("up to date", current,
               "" if current else f"needs v{REQUIRED_SERVICE_VERSION} — restart counselogd there")
         ok &= current
-        _line("mutual TLS", True, f"it sees us as '{health['device']}'")
+        _line("mutual TLS", True,
+              f"we identify as '{health['device']}' (from certs/{device}.crt)")
         if health["device"] != device:
             click.secho(f"  note: the desktop reads our certificate as "
                         f"'{health['device']}', not '{device}'.", fg="yellow")

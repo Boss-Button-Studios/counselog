@@ -80,6 +80,7 @@ def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None) 
         # a single interruption discarding everything already computed — which is
         # exactly what happened the first time this was built as one call.
         done = 0
+        untagged: list[int] = []
         for index, note in enumerate(pending, start=1):
             # Overwrite the "working on it" line in a terminal; keep both lines
             # when output is redirected, where a carriage return just makes a mess.
@@ -103,16 +104,23 @@ def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None) 
 
             note_tags = _parse(answer).get(note.id, [])
             models.set_tags(conn, note.id, note_tags)
+            if not note_tags:
+                untagged.append(note.id)
             done += 1
             elapsed = time.monotonic() - started
             names = ", ".join(_describe(conn, key, c) for key, c in note_tags)
-            prefix = "\r" if live else "      -> "
-            suffix = " " * 20 if live else ""
-            head = f"[{index}/{len(pending)}] note {note.id}: " if live else ""
-            click.echo(f"{prefix}  {head}{names or 'no bin matched'}"
+            # \033[K erases from the cursor to the end of the line. Padding with
+            # a fixed number of spaces cannot work: the line being replaced is as
+            # long as the note preview, so any leftover tail shows through.
+            prefix = "\r  " if live else "      -> "
+            suffix = "\033[K" if live else ""
+            # The note id goes on the result line too when redirected: in a log
+            # with several notes, "-> no bin matched" alone names nothing.
+            head = f"[{index}/{len(pending)}] " if live else ""
+            click.echo(f"{prefix}{head}note {note.id}: {names or 'no bin matched'}"
                        f"  ({elapsed:.0f}s){suffix}")
 
-        _summarise(conn, done, len(pending))
+        _summarise(conn, done, len(pending), untagged)
     except TransportError as exc:
         raise click.ClickException(str(exc)) from exc
     finally:
@@ -137,7 +145,7 @@ def _person_payload(person: models.Person):
     )
 
 
-def _summarise(conn, done: int, total: int) -> None:
+def _summarise(conn, done: int, total: int, untagged: list[int]) -> None:
     click.echo()
     if done == 0:
         click.secho("Nothing was sorted.", fg="yellow")
@@ -151,6 +159,16 @@ def _summarise(conn, done: int, total: int) -> None:
     if unsure:
         click.echo(f"{len(unsure)} guess(es) the model was unsure about. "
                    "Check them with `counselog review`.")
+
+    if untagged:
+        # A note in no bin appears in no report. Saying nothing here would let it
+        # quietly disappear, which is worse than the model simply being wrong.
+        ids = ", ".join(str(i) for i in untagged)
+        click.secho(f"{len(untagged)} note(s) ended up in no bin at all: {ids}",
+                    fg="yellow")
+        click.echo("  They will not show up in any report. If they mention someone,")
+        click.echo("  adding an alias for that person and running `counselog tag`")
+        click.echo("  again will pick them up.")
 
 
 def _describe(conn, key: str, confidence: float | None) -> str:

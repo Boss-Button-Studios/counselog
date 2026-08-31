@@ -130,9 +130,29 @@ def judge_self_team(
 ) -> list[Tag]:
     """Ask the model the one question aliases cannot answer.
 
-    Temperature zero and a fixed seed, so the same note gives the same answer:
-    a probabilistic step in an otherwise deterministic pipeline should at least
-    be repeatable (Law 7).
+    Temperature zero and a fixed seed, asking for repeatability: a
+    probabilistic step in an otherwise deterministic pipeline should at least
+    try to be stable (Law 7).
+
+    Do not mistake that for a guarantee. Measured on the reference desktop:
+
+      - four back-to-back calls with the same note: byte-identical answers
+      - the same note alone: {"self": true, confidence 0.9}
+      - the same note sent straight after a different one: no bins at all
+
+    So the answer depends on what was asked immediately before, even though
+    every request here is stateless and carries its own complete prompt. The
+    variation is in the runtime — a served model reuses cached state between
+    requests — not in this code, and it is not something the caller can switch
+    off from here.
+
+    Three consequences, all of which the surrounding design already had to
+    handle for other reasons:
+
+      - Tags are worth reviewing. A confident answer is not a stable one.
+      - Re-tagging must replace rather than accumulate, because running it again
+        may genuinely disagree with last time.
+      - Do not promise a user that tagging is reproducible. It is not.
     """
     endpoint = (url or config.ollama_url()).rstrip("/") + "/api/chat"
     body = {

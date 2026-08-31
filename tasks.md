@@ -23,7 +23,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 1 — Crypto core | ✅ Complete (53 tests, 89% cov) | desktop (password + stub) |
 | Phase 2 — Storage + hash chain | ✅ Complete (131 tests, 89% cov) | desktop |
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
-| Phase 4 — Bin tagging | ✅ Complete (231 tests, 90% cov) | desktop |
+| Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Reports + dashboard | ⬜ Not started | desktop |
 | Phase 6 — Flask read UI | ⬜ Not started | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
@@ -330,6 +330,43 @@ them by alias alone at no model cost.
 9. **A nonsense confidence falls back below the threshold.** A model returning 7
    has misunderstood the question, and treating that as certainty would
    auto-accept a tag nobody checked.
+
+### Found in real two-machine use
+
+10. **Tagging is not reproducible, and the model is not the reason.** Measured
+    here: four back-to-back calls with the same note gave byte-identical
+    answers, but the same note answered `self` (0.9) alone and *no bins at all*
+    when sent straight after a different note. Every request is stateless and
+    carries its own complete prompt, with `temperature: 0` and a fixed seed —
+    the variation comes from the served runtime reusing cached state between
+    requests, and cannot be switched off from here. Recorded in the tagger's
+    docstring. It is why tags are reviewed, why re-tagging replaces rather than
+    accumulates, and why no part of the interface promises repeatability.
+
+11. **A desktop left running across an update serves its old endpoints.**
+    `./counselog tag` failed with "No such endpoint" against a `counselogd`
+    started before phase 4. `SERVICE_VERSION` now means something: the laptop
+    declares what it needs, and `doctor`, `sync` and `tag` all check before
+    doing slow work. `doctor` gained an "up to date" line.
+
+12. **The desktop was holding the laptop's private key.** `certs init` generates
+    each device's key there for transfer, and nothing removed it afterwards — so
+    a break-in on the desktop would also yield the laptop's identity.
+    `counselog certs prune` deletes other devices' private keys while keeping
+    their certificates, and `certs init` now says to run it. Done on the real
+    desktop.
+
+13. **`doctor` misread as describing the peer.** "it sees us as 'laptop'" is the
+    Common Name of the certificate *we* presented, which confused matters when
+    run on the desktop, since that machine also held `laptop.crt`. Now: "we
+    identify as 'laptop' (from certs/laptop.crt)".
+
+14. **A note matching no bin vanished silently.** It appears in no report and
+    `review` never shows it, because there is no guess to review. `tag` now
+    lists them and says they will not appear in any report.
+
+15. **Progress output padded with spaces**, so the tail of a longer previous
+    line showed through. Now erases to end of line, and only in a terminal.
 
 ## Phase 5 — Reports + dashboard
 

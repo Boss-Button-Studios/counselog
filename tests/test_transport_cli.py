@@ -143,7 +143,7 @@ def live_desktop(run, env, monkeypatch):
 def test_doctor_passes_against_a_live_desktop(with_notes, live_desktop):
     result = with_notes(["doctor", "--loopback"])
     assert result.exit_code == 0
-    assert "it sees us as 'laptop'" in result.output
+    assert "we identify as 'laptop'" in result.output
 
 
 def test_sync_sends_notes_to_the_mirror(with_notes, live_desktop):
@@ -241,3 +241,64 @@ def test_doctor_passes_when_versions_match(with_notes, live_desktop):
     result = with_notes(["doctor", "--loopback"])
     assert result.exit_code == 0
     assert "up to date" in result.output
+
+
+# ── pruning other devices' keys ──────────────────────────────────────────────
+#
+# certs init generates each device's private key on the desktop so it can be
+# copied across. Left there, a break-in on the desktop also yields the laptop's
+# identity — which is more access than the desktop needs (Guideline 4).
+
+
+def test_prune_removes_other_devices_keys(run, env):
+    run(["certs", "init", "--device", "laptop", "--device", "phone"])
+    paths = CertPaths(env / "certs")
+    assert paths.key("laptop").exists() and paths.key("phone").exists()
+
+    result = run(["certs", "prune", "--yes"])
+    assert result.exit_code == 0
+    assert not paths.key("laptop").exists()
+    assert not paths.key("phone").exists()
+
+
+def test_prune_keeps_what_the_desktop_needs(run, env):
+    """Its own identity, and the authority for enrolling more devices."""
+    run(["certs", "init"])
+    run(["certs", "prune", "--yes"])
+    paths = CertPaths(env / "certs")
+    for path in (paths.ca_cert, paths.ca_key, paths.cert("server"), paths.key("server")):
+        assert path.exists(), path
+
+
+def test_prune_keeps_certificates_so_devices_stay_recognised(run, env):
+    run(["certs", "init"])
+    run(["certs", "prune", "--yes"])
+    assert CertPaths(env / "certs").cert("laptop").exists()
+
+
+def test_prune_warns_before_deleting(run):
+    run(["certs", "init"])
+    result = run(["certs", "prune"], stdin="n\n")
+    assert "cannot be undone" in result.output
+    assert result.exit_code != 0
+
+
+def test_prune_is_harmless_when_there_is_nothing_to_remove(run):
+    run(["certs", "init"])
+    run(["certs", "prune", "--yes"])
+    result = run(["certs", "prune", "--yes"])
+    assert result.exit_code == 0
+    assert "No other devices" in result.output
+
+
+def test_certs_init_says_to_prune_afterwards(run):
+    assert "certs prune" in run(["certs", "init"]).output
+
+
+def test_doctor_names_the_certificate_it_presented(with_notes, live_desktop):
+    """The line reports OUR identity, not the machine we are standing on —
+    running doctor on the desktop with the laptop's certificate said
+    'it sees us as laptop', which read as though it were describing the peer."""
+    output = with_notes(["doctor", "--loopback"]).output
+    assert "we identify as 'laptop'" in output
+    assert "certs/laptop.crt" in output
