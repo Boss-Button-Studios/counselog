@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class DatabaseError(Exception):
@@ -62,6 +62,11 @@ CREATE TABLE people (
     id           INTEGER PRIMARY KEY,
     display_name TEXT NOT NULL UNIQUE,
     aliases      TEXT NOT NULL DEFAULT '[]',   -- JSON array, used for bin resolution
+    -- Free text, written the way people write it: 'she/her', 'they/them'.
+    -- NULL means never asked; '' means explicitly not stated. The distinction
+    -- matters: recording "not stated" for someone nobody ever asked about would
+    -- be inventing a considered choice that was never made.
+    pronouns     TEXT,
     active       INTEGER NOT NULL DEFAULT 1,   -- soft delete when someone leaves
     created_at   TEXT NOT NULL
 );
@@ -149,6 +154,28 @@ END;
 
 -- Signatures over a chain head (phase 7). Stored now so signing needs no
 -- migration of a live encrypted database later.
+-- Devices allowed to write notes while the database is locked. Each holds a
+-- random key, kept in that browser, used to prove a spooled note came from it.
+-- The verifying copy lives here, inside the encrypted database, so only an
+-- unlocked server can check it — which is the whole point: the locked server
+-- accepts, and the unlocked server judges.
+CREATE TABLE devices (
+    id          TEXT PRIMARY KEY,
+    label       TEXT NOT NULL,
+    secret      BLOB NOT NULL,
+    enrolled_at TEXT NOT NULL,
+    last_seen   TEXT
+);
+
+-- The private half of the spool keypair. The public half sits outside the
+-- encrypted database, because a locked server must be able to seal a note it
+-- cannot reopen.
+CREATE TABLE spool_identity (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    private_key BLOB NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE signatures (
     id         INTEGER PRIMARY KEY,
     covers_seq INTEGER NOT NULL REFERENCES note_chain(seq),
@@ -158,6 +185,48 @@ CREATE TABLE signatures (
     signed_at  TEXT NOT NULL
 );
 """
+
+
+# Applied in order to bring an older database up to date. Each entry must be
+# safe to run on a database that already holds notes, and must never touch the
+# chain — altering a hashed field during a migration would make every note after
+# it look tampered with.
+MIGRATIONS: dict[int, tuple[str, ...]] = {
+    2: (
+        "ALTER TABLE people ADD COLUMN pronouns TEXT",
+        """CREATE TABLE devices (
+               id          TEXT PRIMARY KEY,
+               label       TEXT NOT NULL,
+               secret      BLOB NOT NULL,
+               enrolled_at TEXT NOT NULL,
+               last_seen   TEXT
+           )""",
+        """CREATE TABLE spool_identity (
+               id          INTEGER PRIMARY KEY CHECK (id = 1),
+               private_key BLOB NOT NULL,
+               created_at  TEXT NOT NULL
+           )""",
+    ),
+}
+
+
+def _migrate(conn: "sqlcipher3.Connection", found: int) -> None:
+    """Bring a database forward, one version at a time.
+
+    Runs inside a transaction per version, so a failure leaves the database at
+    the last version that fully applied rather than half-way through one.
+    """
+    for version in range(found + 1, SCHEMA_VERSION + 1):
+        statements = MIGRATIONS.get(version)
+        if statements is None:
+            raise DatabaseError(f"No migration to schema version {version}.")
+        with conn:
+            for statement in statements:
+                conn.execute(statement)
+            conn.execute(
+                "UPDATE schema_meta SET value = ? WHERE key = 'schema_version'",
+                (str(version),),
+            )
 
 
 def _key_pragma(dek: bytes) -> str:
@@ -253,3 +322,5 @@ def _check_version(conn: "sqlcipher3.Connection") -> None:
             f"This database was written by a newer version of Counselog "
             f"(schema {found}, this build understands {SCHEMA_VERSION})."
         )
+    if found < SCHEMA_VERSION:
+        _migrate(conn, found)
