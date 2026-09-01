@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Sign in · Counselog{% endblock %}
+{% block content %}
+  <h1>Sign in to read your notes</h1>
+
+  {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('do_sign_in') }}">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label for="passphrase">Passphrase</label>
+    <input id="passphrase" name="passphrase" type="password"
+           autocomplete="current-password" autofocus required
+           inputmode="text" enterkeyhint="go">
+    <button type="submit">Unlock</button>
+  </form>
+
+  <p class="aside">
+    You do not need to sign in to write a note. Writing is always available;
+    the passphrase is only for reading what is already there.
+  </p>
+  <p class="aside">Signed in as {{ caller.describe() }}.</p>
+{% endblock %}

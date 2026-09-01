@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Counselog web interface — serves the browser UI on the tailnet.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON="${SCRIPT_DIR}/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+    PYTHON=python3
+fi
+
+if ! "$PYTHON" -c 'import sqlcipher3, click, cryptography, flask' >/dev/null 2>&1; then
+    VERSION="$("$PYTHON" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || echo unknown)"
+    cat >&2 <<MSG
+Counselog is not set up on this machine yet.
+
+Using: $PYTHON (Python $VERSION) — its dependencies are missing.
+
+To set it up, from ${SCRIPT_DIR}:
+
+    python3 -m venv .venv
+    .venv/bin/pip install -e .
+
+Then run this command again.
+
+Counselog needs Python 3.12 or newer.
+MSG
+    exit 1
+fi
+
+PYTHONPATH="$SCRIPT_DIR" exec "$PYTHON" -m web "$@"

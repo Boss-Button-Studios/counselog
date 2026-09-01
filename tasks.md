@@ -24,7 +24,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 2 — Storage + hash chain | ✅ Complete (131 tests, 89% cov) | desktop |
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
-| Phase 5 — Reports + dashboard | ⬜ Not started | desktop |
+| Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
 | Phase 6 — Flask read UI | ⬜ Not started | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
 | Phase 8 — Harden + docs | ⬜ Not started | both |
@@ -367,6 +367,47 @@ them by alias alone at no model cost.
 
 15. **Progress output padded with spaces**, so the tail of a longer previous
     line showed through. Now erases to end of line, and only in a terminal.
+
+## Phase 5 — Web foundation ✅
+
+Architecture revised: the interface moves to a browser served from this desktop
+over the tailnet. See the approved plan for why and what it costs. Delivered:
+`core/crypto/memory.py`, `web/{app,identity,sessions,ratelimit}.py`, templates
+and stylesheet, `./counselogweb`.
+
+**A fix that applies to the code already running.** This machine has 119 GB of
+unencrypted swap, so a key held in memory can be paged to disk in plaintext and
+survive power-off — defeating "a stolen disk is inert ciphertext". `DekSession`
+now holds the key in an `mlock`ed buffer. Honest limits: the DEK is handed to
+SQLCipher as a string and Python makes transient copies that cannot be pinned,
+so this narrows the window rather than closing it. **The durable fix is
+encrypting swap**, which is outside this program.
+
+**The identity header is only trusted from the proxy.** `tailscale serve`
+forwards to loopback and adds headers naming the caller, but any local process
+could set those itself. `web/identity.py` requires both a loopback peer and the
+header; a request from the LAN carrying a forged header is refused with 403,
+verified against a running server.
+
+**Sign-in became a denial-of-service surface.** scrypt costs ~260 ms and 128 MB
+by design — the property that makes a stolen keyring expensive to attack also
+means a few concurrent attempts exhaust 14 GB. `web/ratelimit.py` caps
+concurrency and limits attempts, and the check runs *before* any derivation:
+refusing afterwards would still let an attacker spend the memory.
+
+**Locking is aggressive because capture will not need it.** 5 minutes idle,
+30 minutes absolute, key dropped when the last session ends, and Lock ends every
+session rather than just the current one — pressing Lock means close the notes,
+and leaving another browser holding the key would not be that.
+
+Two small bugs found by running it: Flask injects its own `session` into every
+template, silently shadowing ours wherever a route did not pass one (renamed to
+`unlocked` and injected globally); and an unconfigured `tailscale serve` answers
+`{}`, which is truthy, so the startup check reported "serving something, but not
+this port" when nothing was served at all.
+
+**Not yet done:** `tailscale serve` needs one privileged setup step on this
+machine before any browser can reach it.
 
 ## Phase 5 — Reports + dashboard
 

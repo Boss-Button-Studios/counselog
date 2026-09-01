@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Counselog</h1>
+  {% if unlocked %}
+    <p>Unlocked. Reading is available for the next
+       {{ (unlocked.idle_remaining / 60) | round(0, 'floor') | int }} minutes of inactivity.</p>
+    <p class="aside">
+      Key held in {{ "locked memory" if unlocked.memory_locked else "ordinary memory" }}.
+    </p>
+  {% else %}
+    <p>Locked. You can still write a note; reading needs your passphrase.</p>
+    <p><a href="{{ url_for('sign_in') }}">Sign in to read</a></p>
+  {% endif %}
+  <p class="aside">Capture, people, review and reports arrive in the next phases.</p>
+{% endblock %}
