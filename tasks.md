@@ -534,10 +534,65 @@ by the previous release, which does not survive the release after next.
 `tests/test_migrations.py` takes a current database apart to imitate versions 1
 and 2, and checks the notes and the chain survive coming forward.
 
-### Part 3 — people, the notes list, verify ⬜
+### Part 3 — reading back, and the subject registry 🟨
 
-People and pronoun screening (the `pronouns` column landed in part 1 and is
-still unused), the notes list, and a verify page.
+Four slices, sequenced to keep the one that needs a schema change last, and to
+give something playtestable after each.
+
+**Slice 1 — the notes list, one note, and clearing one ✅**
+`core/display.py`, `web/views/notes.py`, `notes.html`, `note.html`. Before this
+there was no way to read a note back in *either* interface. Clearing goes
+through the same tombstone as `counselog forget`, behind a confirmation page
+that shows the text it is about to destroy — a dialog is easy to dismiss
+without reading, and this is the one irreversible thing the interface can do.
+`_friendly` and `_preview` moved out of `laptop/notes_cli.py` into
+`core/display.py`, so a note reads the same in the terminal and on a phone.
+
+**Cloud spellcheck was quietly on.** The capture textarea set no `spellcheck`
+attribute, so it inherited the browser default — and Chrome's "enhanced spell
+check" and Edge's Microsoft Editor send what you type to their servers. The
+README promises notes never leave your two machines; that promise was false for
+anyone with that setting on, and nothing disclosed it (Law 2). Now
+`spellcheck="false"` explicitly, with the reason in the template so nobody
+"tidies it up" later.
+
+**Slice 2 — the subject registry ⬜** (no schema change needed)
+List, add, and *edit*: aliases can currently only be set when a person is
+created, with no way to add one later or fix a spelling, which quietly costs
+tagging accuracy since aliases are what resolve people exactly. Pronouns, free
+text, three states as the schema insists: never asked (NULL), stated, and
+explicitly not stated (`''`). "Left the team" stays a status flag — `tag` sends
+people with `include_inactive=True` and `notes_for_bin` ignores `active`, so a
+former colleague still resolves in new notes and their old notes stay readable.
+
+**Slice 3 — editing a note, as revisions ⬜** (schema version 4)
+Decided rather than assumed, because editing text in place would re-hash the
+body and make `verify` report the note as altered — indistinguishable from
+tampering, and the schema refuses it anyway: `note_chain` has a trigger denying
+UPDATE outright. So an edit appends a revision and the original body stays
+hashed and intact. The consequence, which has to be said out loud in the
+interface: an edit corrects the record, it does not unsay anything. `forget` is
+what removes text.
+
+**Slice 4 — a verify page ⬜**
+`models.verify` already exists and is CLI-only. The page must repeat what the
+CLI prints: that this shows the notes are unaltered, not that what they say is
+true, nor exactly when the events happened.
+
+### Backlog — wanted, not scheduled
+
+Raised while playtesting; recorded so they are not rediscovered later.
+
+- **Offline spelling and grammar help.** Wanted more once editing means a
+  permanent revision rather than a silent fix. Must not be the browser's, for
+  the reason above. The local model could do it, but that is a slow round trip
+  for a typo, so this needs thought rather than an obvious answer.
+- **File ingest in the browser.** `counselog import` already exists in the CLI,
+  one file to one note, with `--third-party` setting `source_trust` so the
+  stronger sanitization of spec §10 can be applied later. The browser has no
+  equivalent. Note that spec §7 deliberately scoped sanitization to
+  self-authored text; a file arriving from elsewhere is the case that scoping
+  was deferring, so this is not purely an interface job.
 
 ### Part 4 — reports + dashboard ⬜
 

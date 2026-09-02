@@ -73,7 +73,14 @@
   <form method="post" action="{{ url_for('write') }}" id="capture">
     <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
     <label for="text">What happened?</label>
+    {# spellcheck is off deliberately, and this is not a style preference.
+       Chrome's "enhanced spell check" and Edge's Microsoft Editor send what you
+       type to their servers. The README says notes never leave your two
+       machines, and leaving the browser default in place would make that false
+       for anyone who has that setting on — without ever telling them (Law 2).
+       Offline spelling help is on the backlog; it does not come from here. #}
     <textarea id="text" name="text" rows="9" required autofocus
+              spellcheck="false"
               enterkeyhint="enter" autocapitalize="sentences"
               placeholder="Ada pushed back on the timeline, and was right to.">{{ text }}</textarea>
     {# Filled in by capture.js just before submitting. Empty is a valid state:
@@ -100,6 +107,7 @@
 
   {% if unlocked %}
     <p class="aside">
+      <a href="{{ url_for('note_list') }}">Your notes</a> ·
       <a href="{{ url_for('device_list') }}">Browsers</a> ·
       <a href="{{ url_for('held_list') }}">Held for review</a>
     </p>

@@ -68,6 +68,9 @@
     <p class="aside">No browser is enrolled yet.</p>
   {% endif %}
 
-  <p class="aside"><a href="{{ url_for('home') }}">Back to writing</a></p>
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">Your notes</a> ·
+    <a href="{{ url_for('home') }}">Back to writing</a>
+  </p>
 
 {% endblock %}

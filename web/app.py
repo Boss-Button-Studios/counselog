@@ -18,6 +18,7 @@ import secrets
 
 from flask import Flask, abort, g, render_template, request, session as cookie
 
+from core.display import friendly_time, preview
 from web.access import CSRF_FIELD, sessions_of
 from web.identity import identify
 from web.ratelimit import SignInLimiter
@@ -78,6 +79,10 @@ def create_app(*, sessions: BrowserSessions | None = None,
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    # Shared with the CLI, so a note reads the same in both (core/display.py).
+    app.jinja_env.filters["friendly_time"] = friendly_time
+    app.jinja_env.filters["preview"] = preview
 
     _register_csrf(app)
     _register_errors(app)

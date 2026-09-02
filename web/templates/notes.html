@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Your notes · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Your notes</h1>
+
+  {% if notes %}
+    <p class="aside">
+      {{ notes | length }} note{{ "" if notes | length == 1 else "s" }}, newest
+      first{% if cleared %}, {{ cleared }} of them cleared{% endif %}.
+    </p>
+
+    <ul class="rows notes">
+      {% for note in notes %}
+        <li>
+          <a href="{{ url_for('note_detail', note_id=note.id) }}">
+            <span class="when">
+              {{ note.occurred_at | friendly_time }}
+              {% if note.backdated_at %}
+                <span class="marker" title="recorded as happening earlier than it was written">backdated</span>
+              {% endif %}
+              {% if note.tombstoned %}
+                <span class="marker">cleared</span>
+              {% endif %}
+            </span>
+            <span class="{{ 'gone' if note.tombstoned else 'text' }}">
+              {{ note.raw_text | preview }}
+            </span>
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p>Nothing yet. Notes you write will appear here.</p>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('home') }}">Write a note</a> ·
+    <a href="{{ url_for('device_list') }}">Browsers</a> ·
+    <a href="{{ url_for('held_list') }}">Held for review</a>
+  </p>
+
+{% endblock %}

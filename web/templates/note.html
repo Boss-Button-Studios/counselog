@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Note {{ note.id }} · Counselog{% endblock %}
+{% block content %}
+
+  {% if confirming %}
+    <div class="notice danger" role="alert">
+      <p><strong>Clear this note permanently?</strong></p>
+      <p>The text below goes and cannot be brought back. The note keeps its
+         place in the record, so everything around it stays verifiable — but
+         nothing will be provable about what this one said.</p>
+      <form method="post" action="{{ url_for('clear_note', note_id=note.id) }}">
+        <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+        <button type="submit" class="destructive">Yes, clear it</button>
+        <a class="cancel" href="{{ url_for('note_detail', note_id=note.id) }}">Keep it</a>
+      </form>
+    </div>
+  {% endif %}
+
+  <h1>{{ note.occurred_at | friendly_time }}</h1>
+
+  <p class="aside">
+    Written {{ note.captured_at | friendly_time }}
+    {% if note.backdated_at %}
+      · recorded as happening {{ note.backdated_at | friendly_time }}
+    {% endif %}
+    {% if note.source_type == "file_import" %} · imported from a file{% endif %}
+    {% if note.source_trust == "third_party" %} · written by someone else{% endif %}
+  </p>
+
+  {% if note.tombstoned %}
+    <p class="notice" role="status">
+      Cleared {{ note.tombstoned_at | friendly_time }}. The text is gone; its
+      place in the record remains.
+    </p>
+  {% else %}
+    <div class="note-text">{{ note.raw_text }}</div>
+  {% endif %}
+
+  {% if tags %}
+    <h2>Sorted into</h2>
+    <ul class="rows">
+      {% for label, confidence in tags %}
+        <li>
+          <div>
+            <strong>{{ label }}</strong>
+            <span class="aside">
+              {% if confidence is none %}
+                matched by name
+              {% else %}
+                the model was {{ (confidence * 100) | round | int }}% sure
+              {% endif %}
+            </span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="aside">
+      Not sorted into any bin yet, so it will not appear in a report.
+    </p>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">All notes</a>
+    {% if not note.tombstoned and not confirming %}
+      · <a class="danger-link" href="{{ url_for('confirm_clear', note_id=note.id) }}">Clear this note</a>
+    {% endif %}
+  </p>
+
+{% endblock %}

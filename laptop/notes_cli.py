@@ -13,6 +13,7 @@ from pathlib import Path
 import click
 
 from core import db, intake, models
+from core.display import friendly_time as _friendly, preview as _preview
 from core.paths import notes_db_path
 from core.sanitize import describe_changes, sanitize
 from laptop.unlock import FACTOR_CHOICES, load_keyring, open_database, unlock_dek
@@ -215,15 +216,3 @@ def _warn_if_changed(text: str) -> None:
         click.echo(click.style(f"Note: {change} from the pasted text.", dim=True))
 
 
-def _preview(text: str, limit: int = 200) -> str:
-    if not text:
-        return "(already cleared)"
-    flat = " ".join(text.split())
-    return flat if len(flat) <= limit else flat[:limit] + "…"
-
-
-def _friendly(iso: str) -> str:
-    try:
-        return datetime.fromisoformat(iso).strftime("%Y-%m-%d %H:%M")
-    except ValueError:
-        return iso
