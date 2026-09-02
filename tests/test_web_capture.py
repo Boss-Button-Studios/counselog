@@ -476,6 +476,115 @@ def test_the_text_of_a_held_entry_is_not_kept(client, dek):
     assert b"unmistakeable phrasing" not in notes_db_path().read_bytes()
 
 
+# ── what the spool keeps afterwards ──────────────────────────────────────────
+
+
+def test_a_filed_note_leaves_no_sealed_copy_behind(client, dek):
+    """The record is the only place a filed note lives.
+
+    The spool holds a note between writing it and the next sign-in. Once it is
+    inside the encrypted database there is no reason for that sealed copy to
+    outlive it, and every reason for it not to — see the `forget` test below.
+    """
+    sign_in(client)
+    device = enroll(client)
+    lock(client)
+    write(client, "Ada pushed back on the timeline.", device=device)
+    sign_in(client)
+
+    entries = spool_entries()
+    assert len(entries) == 1, "the entry keeps its place in the chain"
+    assert entries[0].ciphertext == b"", "but not its body"
+
+
+def test_forgetting_a_note_written_while_locked_really_forgets_it(client, dek):
+    """The gap this exists to close.
+
+    `forget` clears a note's text from the record. Before the spool learned to
+    drop drained bodies, a note written while locked kept a complete sealed copy
+    in a second file that `forget` had never heard of — so honouring a deletion
+    request left the text recoverable by anyone who could open the spool key.
+
+    The test opens the leftovers with the real private key rather than grepping
+    the file for the words. A sealed body is ciphertext, so a plaintext search
+    finds nothing whether or not the copy is still there — which is exactly the
+    sort of test that passes while the thing it claims to check is broken.
+    """
+    secret = "Tom disclosed something in confidence."
+    sign_in(client)
+    device = enroll(client)
+    lock(client)
+    write(client, secret, device=device)
+    sign_in(client)
+
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        models.tombstone_note(conn, models.list_notes(conn)[0].id)
+        private = intake.private_key(conn)
+    finally:
+        conn.close()
+
+    recovered = []
+    for entry in spool_entries():
+        try:
+            recovered.append(spool.unseal(private, entry.ciphertext))
+        except Exception:
+            pass  # nothing left to open, which is the point
+    assert not any(secret.encode() in blob for blob in recovered), \
+        "a forgotten note is still recoverable from the spool"
+    assert secret.encode() not in notes_db_path().read_bytes()
+
+
+def test_clearing_a_body_does_not_break_the_chain(client, dek):
+    """The link has to survive the body, exactly as a tombstone does."""
+    sign_in(client)
+    device = enroll(client)
+    lock(client)
+    write(client, "first", device=device)
+    sign_in(client)
+    lock(client)
+    write(client, "second", device=device)
+    sign_in(client)
+
+    assert [note.raw_text for note in notes_in(dek)] == ["first", "second"]
+    assert all(entry.ciphertext == b"" for entry in spool_entries())
+
+
+def test_a_held_entry_keeps_its_body(client, dek):
+    """Its text is in no other place, and it may well be a genuine note."""
+    write(client, "who wrote this?")
+    sign_in(client)
+
+    entries = spool_entries()
+    assert len(entries) == 1
+    assert entries[0].ciphertext != b"", "the only copy there is"
+
+
+def test_a_body_left_by_an_interrupted_drain_is_cleared_next_time(client, dek):
+    """The sweep heals the file rather than relying on nothing going wrong.
+
+    Imitates a drain that filed a note and then died before clearing, and a
+    build that never cleared at all — the same shape of leftover either way.
+    """
+    sign_in(client)
+    device = enroll(client)
+    lock(client)
+    write(client, "left behind", device=device)
+    sign_in(client)
+
+    sealed = spool.seal(intake.published_key(), b"pretend this was never cleared")
+    conn = spool.connect(spool_db_path())
+    try:
+        conn.execute("UPDATE entries SET ciphertext = ? WHERE seq = 1", (sealed,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    lock(client)
+    sign_in(client)          # nothing new to drain; the sweep still runs
+    assert spool_entries()[0].ciphertext == b""
+
+
 # ── the published key ────────────────────────────────────────────────────────
 
 

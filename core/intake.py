@@ -252,6 +252,10 @@ def take_in(conn, spool_conn) -> IntakeReport:
             # Settle on the new file, so a replacement is reported once rather
             # than at every sign-in until something is written.
             set_bookmark(conn, 0, spool.GENESIS, this_file)
+        else:
+            # Nothing new, but a body left behind by an interrupted drain — or by
+            # a build that did not clear them — still wants clearing.
+            sweep_filed_bodies(conn, spool_conn)
         return report
 
 
@@ -281,7 +285,31 @@ def take_in(conn, spool_conn) -> IntakeReport:
 
     for device_id in seen_devices:
         devices.touch(conn, device_id)
+
+    sweep_filed_bodies(conn, spool_conn)
     return report
+
+
+def sweep_filed_bodies(conn, spool_conn) -> int:
+    """Clear the sealed body of everything already safely in the record.
+
+    A sweep rather than a step inside the loop, and that is deliberate. Clearing
+    each body as its note is filed would miss anything interrupted half way, and
+    would never reach entries left behind by a build that did not do this at
+    all. Running over the whole drained range every time means the file heals
+    itself on the next sign-in, whatever happened before.
+
+    Quarantined entries are left alone: their text is not in the record, so this
+    file holds the only copy of what may well be a genuine note.
+    """
+    up_to, _, _ = bookmark(conn)
+    if not up_to:
+        return 0
+    held_seqs = {row["seq"] for row in conn.execute("SELECT seq FROM spool_quarantine")}
+    cleared = spool.clear_bodies(spool_conn, up_to, keep=held_seqs)
+    if cleared:
+        spool.compact(spool_conn)
+    return cleared
 
 
 def _store(conn, note: spool.DrainedNote, report: IntakeReport) -> None:

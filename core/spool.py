@@ -236,6 +236,11 @@ def connect(path: Path | str) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
+    # Overwrite freed content instead of leaving it in the page. This file holds
+    # note text that has not reached the encrypted database yet, and clearing a
+    # drained body (see `clear_bodies`) should not leave the old bytes lying in
+    # a free page where a strings(1) would find them.
+    conn.execute("PRAGMA secure_delete = ON")
     conn.executescript(SPOOL_SCHEMA)
     conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('spool_id', ?)",
                  (os.urandom(16).hex(),))
@@ -298,6 +303,48 @@ def entries_after(conn: sqlite3.Connection, seq: int) -> list[SpoolEntry]:
                    entry_hash=r["entry_hash"], received_at=r["received_at"])
         for r in conn.execute("SELECT * FROM entries WHERE seq > ? ORDER BY seq", (seq,))
     ]
+
+
+def clear_bodies(conn: sqlite3.Connection, up_to_seq: int, *,
+                 keep: frozenset[int] | set[int] = frozenset()) -> int:
+    """Empty the sealed body of entries already in the record. Keeps the row.
+
+    The same reasoning as a tombstone in the record itself: the link has to
+    survive so the chain still verifies, but the text does not need to be here
+    once it is safely inside the encrypted database.
+
+    Without this the spool keeps a complete sealed copy of every note ever
+    written while locked, for as long as the file exists — so `counselog forget`
+    would clear a note from the record and leave that copy behind, recoverable
+    by anyone who could open the spool key. Honouring a deletion request has to
+    mean the text is gone from everywhere it was put.
+
+    `keep` is for entries that were quarantined. Their text is not in the record
+    and is not anywhere else, so clearing it would destroy the only copy of what
+    might be a genuine note.
+
+    Cleared in place with `secure_delete` on, and the caller vacuums afterwards.
+    Neither is a guarantee the bytes are unrecoverable from the physical disk —
+    a copy-on-write filesystem or an SSD's wear levelling can keep an old page
+    alive regardless. This narrows the window; it does not close it.
+    """
+    targets = [
+        row["seq"] for row in conn.execute(
+            "SELECT seq FROM entries WHERE seq <= ? AND length(ciphertext) > 0",
+            (up_to_seq,))
+        if row["seq"] not in keep
+    ]
+    if not targets:
+        return 0
+    with conn:
+        conn.executemany("UPDATE entries SET ciphertext = X'' WHERE seq = ?",
+                         [(seq,) for seq in targets])
+    return len(targets)
+
+
+def compact(conn: sqlite3.Connection) -> None:
+    """Rewrite the file so cleared bodies stop occupying pages in it."""
+    conn.execute("VACUUM")
 
 
 def recompute_hash(entry: SpoolEntry) -> str:

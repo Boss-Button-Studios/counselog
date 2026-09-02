@@ -25,7 +25,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
-| Phase 6 — The browser interface | 🟨 Parts 1–2 done (384 tests, 89% cov) | desktop |
+| Phase 6 — The browser interface | 🟨 Parts 1–2 done (389 tests, 89% cov) | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
 | Phase 8 — Harden + docs | ⬜ Not started | both |
 
@@ -502,6 +502,30 @@ one past the length cap, and the second keeps the text in the box.
 browser, not once per note, because the key a browser is given has to be written
 somewhere only an unlocked server can read. It is shown once and no route will
 show it again.
+
+**A spooled note outlived `forget`.** Found by looking at the real spool after
+the first live note, not by the tests. The drain advanced its bookmark and left
+the entry in place, body and all — correct for the chain, wrong for everything
+else. `counselog forget` tombstones a note's text in the record and has never
+heard of the spool, so any note written while locked kept a complete sealed copy
+in a second file, recoverable by anyone who could open the spool key. Phase 2
+built tombstoning precisely so a deletion request could be honoured; this
+undermined it for exactly the notes the newest feature captures.
+
+Fixed the same way the record already handles it: `clear_bodies` empties a
+drained entry's body and keeps its row, so the link survives the text. It runs
+as a sweep over the whole drained range at every drain rather than as a step
+beside each note, so the file heals itself after an interruption — or after a
+build that never cleared at all. Quarantined entries keep their bodies: their
+text is not in the record, so the spool holds the only copy of what may be a
+genuine note. `PRAGMA secure_delete` and a vacuum afterwards; both narrow the
+window rather than close it, since a copy-on-write filesystem or an SSD's wear
+levelling can keep an old page alive regardless.
+
+The first version of that test was worthless and passed with the fix disabled:
+it grepped the file for the note's words, and a sealed body is ciphertext, so it
+would never have found them either way. It now opens the leftovers with the real
+private key. Checked by disabling the fix and watching all four tests fail.
 
 Two housekeeping items. The routes moved to `web/views/` with shared helpers in
 `web/access.py`, because `web/app.py` was heading past the 600-line cap.
