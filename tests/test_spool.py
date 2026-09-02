@@ -9,12 +9,11 @@ These attack the spool the way someone with write access to the file would.
 """
 
 import os
-import sqlite3
 
 import pytest
 
 from core import spool
-from core.spool import Quarantined, SpoolError
+from core.spool import SpoolError
 
 
 @pytest.fixture

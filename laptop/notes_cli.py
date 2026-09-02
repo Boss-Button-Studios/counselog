@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from core import db, models
+from core import db, intake, models
 from core.paths import notes_db_path
 from core.sanitize import describe_changes, sanitize
 from laptop.unlock import FACTOR_CHOICES, load_keyring, open_database, unlock_dek
@@ -41,6 +41,10 @@ def init(unlock_with: str | None) -> None:
     dek = unlock_dek(load_keyring(), unlock_with)
     try:
         conn = db.create(path, dek)
+        # Made here rather than at the first sign-in, so that writing a note in
+        # the browser works from the moment the database exists — including
+        # before anyone has ever unlocked it there.
+        intake.ensure_identity(conn)
     except db.DatabaseError as exc:
         raise click.ClickException(str(exc)) from exc
     conn.close()

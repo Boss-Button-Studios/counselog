@@ -6,7 +6,7 @@ A supervisor's encrypted note journal. Capture freeform notes, bin them
 (per-person / self / team) with a local LLM, read them back as per-person
 digests. See `counselog-tech-spec.md` for the design, `CLAUDE.md` for the rules.
 
-**Stack:** Python 3.12+ · Click (CLI) · Flask (read UI) · SQLCipher (storage) ·
+**Stack:** Python 3.12+ · Click (CLI) · Flask (browser UI) · SQLCipher (storage) ·
 `cryptography` (envelope encryption, mTLS) · Ollama (inference, desktop only)
 
 **Scope:** v0/MVP per spec §9 — capture, bin tagging, encrypted storage on both
@@ -25,11 +25,16 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
-| Phase 6 — Flask read UI | ⬜ Not started | desktop |
+| Phase 6 — The browser interface | 🟨 Parts 1–2 done (384 tests, 89% cov) | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
 | Phase 8 — Harden + docs | ⬜ Not started | both |
 
 Phases 0–6 are buildable entirely on the desktop. Only phase 7 needs the laptop.
+
+Phase 6 absorbed what earlier drafts listed as separate reports and read-UI
+phases. Once the interface moved to a browser (phase 5), a "Flask read UI" was
+no longer a phase of its own — it is what phase 6 builds — and reports are pages
+in it rather than a thing that comes first.
 
 ---
 
@@ -409,23 +414,116 @@ this port" when nothing was served at all.
 **Not yet done:** `tailscale serve` needs one privileged setup step on this
 machine before any browser can reach it.
 
-## Phase 5 — Reports + dashboard
+## Phase 6 — The browser interface
 
-`desktop/reporter.py`; `counselog report`, `dash`.
+`counselogweb`. Capture, reading, and reports, all in the browser served over
+the tailnet. Four parts; two are done.
+
+### Part 1 — the sealed spool ✅
+
+`core/spool.py`, schema version 2. A note can be written with no key available:
+it is sealed to a public key and set aside, and the next sign-in judges it
+against a hash chain over the entries and a per-device MAC. See the commit for
+the full reasoning; the short version is that the locked server accepts and the
+unlocked server judges.
+
+### Part 2 — capture, enrolment, and the drain ✅
+
+`core/{devices,intake}.py`, `web/access.py`, `web/views/{auth,capture,devices,held}.py`,
+`web/static/{stamp,capture}.js`, capture/devices/held templates, schema
+version 3. The capture box is now the home page, and `counselog init` publishes
+the spool's public key so writing works from the moment the database exists.
+
+**Two capture paths, split exactly on the key.** Signed in, a note goes straight
+into the record; locked, it is sealed to the spool. One path for both — always
+spool, drain at sign-in — was the first design and was wrong: a note you had
+just written would be invisible until you signed in again, and an unenrolled
+browser would have its notes held even while its user was sitting there
+unlocked. The split costs a branch and removes both problems.
+
+**The stamped bytes stopped being JSON.** They are the one thing in Counselog
+produced in a browser and checked in Python, and JSON implementations do not
+agree on escaping control characters, non-ASCII or lone surrogates. A
+disagreement would hold a genuine note for review and look exactly like
+tampering. They are now length-prefixed the way the chain already does it
+(`chain.length_prefixed`, promoted from private). `tests/test_web_capture.py`
+runs `web/static/stamp.js` under node and compares bytes *and* HMACs against
+Python over accented text, Japanese, emoji, tabs, quotes and backslashes.
+
+**A form submission rewrites every newline as CRLF.** Found by writing the test,
+not by reading the code. The browser stamps the text it holds, which uses plain
+newlines, so without normalising on both sides *every multi-line note* would
+have failed its check — the feature would have worked for one-line notes and
+quietly failed for real ones. `sanitize.normalize_newlines` is now the shared
+definition, and the JavaScript carries the same two replacements.
+
+**`captured_at` comes from this machine's clock, never the device's claim.** The
+claim is inside what the device stamps, so it cannot be moved after the fact,
+but it is still a phone's clock — and `captured_at` is the field that has to
+mean something in an HR conversation. One clock, ours. A device more than five
+minutes out is reported rather than quietly corrected.
+
+**The spool file needed a name of its own.** Also found by a failing test: the
+first design detected a replaced spool by noticing it was *shorter* than the
+bookmark, which a file deleted and rebuilt to the same length walks straight
+past. The bookmark now records which file it was reading, and the two anomalies
+are handled differently because the right answer differs:
+
+  - **Replaced** (a different file): nothing in it was ever taken in, so it is
+    read from the start. Notes in the old one are gone — deleting the file
+    destroys notes, it cannot add any — and that is reported.
+  - **Altered** (the same file, with the entry the drain stopped at changed):
+    reading from the start would file notes into the record a *second* time, so
+    reading carries on from the bookmark and the chain check does the rest. A
+    note written straight after the edit is held rather than filed, which is the
+    chain working: an attacker cannot make an edit invisible by writing over it.
+    Reading catches up on the next drain, so the effect is bounded.
+
+**Quarantine is written down, not just reported.** An entry that fails a check
+is evidence that something wrote to the spool that should not have, and evidence
+that evaporates when the service restarts is not evidence. The *text* is not
+kept: an entry that failed its checks has not earned a place in the record, and
+storing it would build a second, unverified pile of notes beside the real one.
+
+**The published public key is rewritten from the private half at every
+sign-in.** It is the one file an attacker could usefully replace — swap in their
+own key and the locked server would seal tomorrow's notes where they could read
+them. Republishing bounds that to a single reading session, and notes sealed to
+the wrong key surface in the quarantine instead of vanishing.
+
+**Nothing is refused at capture that would cost a note.** A device id that is
+not ours, a stamp of the wrong shape, a timestamp in the wrong form: all are
+normalised to something the drain will recognise as unstamped, and the writer is
+told *at the time* that the note will be held. Scripting off is the same path,
+and the page says so in a `<noscript>`. The only refusals are an empty note and
+one past the length cap, and the second keeps the text in the box.
+
+**Enrolment is the one part of capture that needs the passphrase** — once per
+browser, not once per note, because the key a browser is given has to be written
+somewhere only an unlocked server can read. It is shown once and no route will
+show it again.
+
+Two housekeeping items. The routes moved to `web/views/` with shared helpers in
+`web/access.py`, because `web/app.py` was heading past the 600-line cap.
+And migrations gained tests: they were checked by hand against a database built
+by the previous release, which does not survive the release after next.
+`tests/test_migrations.py` takes a current database apart to imitate versions 1
+and 2, and checks the notes and the chain survive coming forward.
+
+### Part 3 — people, the notes list, verify ⬜
+
+People and pronoun screening (the `pronouns` column landed in part 1 and is
+still unused), the notes list, and a verify page.
+
+### Part 4 — reports + dashboard ⬜
+
+`desktop/reporter.py`, as pages rather than CLI commands.
 
 - Per-person digest: chronological, deterministic cleanup only (whitespace and
   markdown). §9 says no synthesis; Law 7 wants predictable output. LLM polish
   sits behind an explicit `--polish`.
 - Backdated notes shown at `backdated_at` with a visible marker.
 - Dashboard: note count and days-since-last per person. Pure SQL, no LLM.
-
-## Phase 6 — Flask read UI
-
-`laptop/web/app.py`; `counselog ui`.
-
-Launched from an already-unlocked CLI process so the DEK stays in one process.
-Bound to 127.0.0.1, random token in the URL, strict CSP, no external assets.
-Read-only: `/person/<id>` and `/dash`. Capture stays in the CLI.
 
 ## Phase 7 — PIV signing *(laptop)*
 

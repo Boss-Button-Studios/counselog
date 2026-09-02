@@ -7,6 +7,12 @@
   <meta name="color-scheme" content="light dark">
   <title>{% block title %}Counselog{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {# Deferred so the capture box is on screen before anything runs. Nothing on
+     any page depends on these having run: a browser that ignores them still
+     writes notes, they are simply held for review. Order matters — capture.js
+     uses what stamp.js defines, and deferred scripts run in document order. #}
+  <script src="{{ url_for('static', filename='stamp.js') }}" defer></script>
+  <script src="{{ url_for('static', filename='capture.js') }}" defer></script>
 </head>
 <body>
   <header>

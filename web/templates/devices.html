@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Browsers · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Browsers that may write while locked</h1>
+
+  <p class="aside">
+    A browser you enrol here is given a key of its own, kept in that browser.
+    It stamps every note it writes, and this database checks the stamp when you
+    sign in. A note from anywhere else is still saved — it is held for review
+    rather than filed.
+  </p>
+
+  {% if enrolled %}
+    {# The one and only time this key is rendered. The script on this page
+       stores it in this browser; no route will show it again. #}
+    <p class="notice" role="status"
+       id="enrolled"
+       data-device-id="{{ enrolled.id }}"
+       data-device-secret="{{ enrolled.secret }}"
+       data-device-label="{{ enrolled.label }}">
+      Enrolling this browser as <strong>{{ enrolled.label }}</strong>…
+    </p>
+    <noscript>
+      <p class="error" role="alert">
+        This browser cannot store the key without scripting, so the enrolment
+        did not take. You can revoke it below.
+      </p>
+    </noscript>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('enroll_device') }}">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <label for="label">Name this browser</label>
+    <input id="label" name="label" type="text" maxlength="60"
+           autocomplete="off" placeholder="Phone">
+    <button type="submit">Enrol this browser</button>
+  </form>
+
+  <h2>Enrolled</h2>
+  {% if devices %}
+    <ul class="rows">
+      {% for device in devices %}
+        <li>
+          <div>
+            <strong>{{ device.label }}</strong>
+            <span class="mono">{{ device.id }}</span>
+            <span class="aside">
+              enrolled {{ device.enrolled_at }} ·
+              {% if device.last_seen %}last wrote {{ device.last_seen }}
+              {% else %}has not written yet{% endif %}
+            </span>
+          </div>
+          <form method="post" class="inline"
+                action="{{ url_for('revoke_device', device_id=device.id) }}">
+            <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+            <button type="submit" class="quiet">Revoke</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="aside">
+      Revoking is not retroactive. Notes a browser already wrote passed their
+      checks and are part of your record; revoking only decides what happens to
+      notes it writes from now on.
+    </p>
+  {% else %}
+    <p class="aside">No browser is enrolled yet.</p>
+  {% endif %}
+
+  <p class="aside"><a href="{{ url_for('home') }}">Back to writing</a></p>
+
+{% endblock %}

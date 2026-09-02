@@ -7,34 +7,24 @@ conversation ends, and that moment is rarely spent at a terminal.
 Two gates, doing different jobs. A tailscale ACL decides which devices can
 reach the port at all; the passphrase decides what unlocks the notes. Reaching
 the page proves nothing about being allowed to read anything.
+
+This module is the frame: the factory, the policies that apply to every request,
+and the error pages. The routes themselves live in `web/views/`.
 """
 
 from __future__ import annotations
 
-import functools
 import secrets
-from typing import Callable
 
-from flask import (
-    Flask,
-    abort,
-    g,
-    redirect,
-    render_template,
-    request,
-    session as cookie,
-    url_for,
-)
+from flask import Flask, abort, g, render_template, request, session as cookie
 
-from core import db
-from core.crypto import Keyring, KeyringError, PasswordFactor, UnlockFailed
-from core.paths import keyring_path, notes_db_path
+from web.access import CSRF_FIELD, sessions_of
 from web.identity import identify
-from web.ratelimit import SignInLimiter, TooManyAttempts
-from web.sessions import BrowserSessions, NotSignedIn
+from web.ratelimit import SignInLimiter
+from web.sessions import BrowserSessions
+from web.views import register_all
 
 SESSION_COOKIE = "counselog_session"
-CSRF_FIELD = "_csrf"
 
 
 def create_app(*, sessions: BrowserSessions | None = None,
@@ -70,7 +60,11 @@ def create_app(*, sessions: BrowserSessions | None = None,
     def security_headers(response):
         """No external anything. The page is served from one machine and needs
         nothing from the internet, so the policy can be absolute rather than a
-        negotiation."""
+        negotiation.
+
+        `script-src 'self'` and no `'unsafe-inline'`: the one script this
+        interface has is a file, and everything it needs to know arrives in
+        `data-` attributes rather than in an inline block."""
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; "
             "style-src 'self'; "
@@ -86,7 +80,8 @@ def create_app(*, sessions: BrowserSessions | None = None,
         return response
 
     _register_csrf(app)
-    _register_routes(app)
+    _register_errors(app)
+    register_all(app)
     return app
 
 
@@ -125,126 +120,13 @@ def _register_csrf(app: Flask) -> None:
         pass it would otherwise render as though locked. Deliberately not called
         `session` — Flask already puts the cookie under that name.
         """
-        from flask import current_app
-        return {"unlocked": sessions_of(current_app).info(cookie.get("sid"))}
+        return {"unlocked": sessions_of().info(cookie.get("sid"))}
 
 
-# ── access to the database ───────────────────────────────────────────────────
+# ── error pages ──────────────────────────────────────────────────────────────
 
 
-def sessions_of(app: Flask) -> BrowserSessions:
-    return app.config["SESSIONS"]
-
-
-def signed_in() -> bool:
-    from flask import current_app
-    return sessions_of(current_app).info(cookie.get("sid")) is not None
-
-
-def requires_unlock(view: Callable) -> Callable:
-    """For anything that reads notes. Capture deliberately does not use this."""
-
-    @functools.wraps(view)
-    def wrapper(*args, **kwargs):
-        from flask import current_app
-        try:
-            g.dek = sessions_of(current_app).key(cookie.get("sid"))
-        except NotSignedIn:
-            return redirect(url_for("sign_in", next=request.path))
-        return view(*args, **kwargs)
-
-    return wrapper
-
-
-def open_database():
-    """Open the notes database with the key from the current session."""
-    return db.connect(notes_db_path(), g.dek)
-
-
-# ── routes ───────────────────────────────────────────────────────────────────
-
-
-def _register_routes(app: Flask) -> None:
-
-    @app.get("/signin")
-    def sign_in():
-        if signed_in():
-            return redirect(url_for("home"))
-        return render_template("signin.html", caller=g.caller, error=None,
-                               next=request.args.get("next", "/"))
-
-    @app.post("/signin")
-    def do_sign_in():
-        from flask import current_app
-        limiter: SignInLimiter = current_app.config["LIMITER"]
-        caller = g.caller.login or "unknown"
-        target = request.form.get("next") or "/"
-
-        def refuse(message: str, status: int = 401):
-            return render_template("signin.html", caller=g.caller, error=message,
-                                   next=target), status
-
-        # Checked before any derivation: refusing afterwards would still let an
-        # attacker spend 128 MB of this machine's memory per attempt.
-        try:
-            limiter.check(caller)
-        except TooManyAttempts as exc:
-            return refuse(str(exc), 429)
-
-        passphrase = request.form.get("passphrase") or ""
-        if not passphrase:
-            return refuse("Enter your passphrase.")
-
-        try:
-            ring = Keyring.load(keyring_path())
-        except KeyringError as exc:
-            return refuse(str(exc), 500)
-
-        with limiter.slot():
-            try:
-                dek = ring.unlock(PasswordFactor(passphrase))
-            except (UnlockFailed, KeyringError):
-                # Deliberately not saying which part was wrong.
-                return refuse("That passphrase did not unlock your notes.")
-
-        limiter.succeeded(caller)
-        # New id on sign-in, so a session id seen before the passphrase was
-        # entered cannot become an authenticated one.
-        cookie.clear()
-        cookie["sid"] = sessions_of(current_app).sign_in(caller, dek)
-        cookie["csrf"] = secrets.token_urlsafe(32)
-        return redirect(target if target.startswith("/") else "/")
-
-    @app.post("/lock")
-    def lock():
-        """Discard the key now, on every device.
-
-        Locks everything rather than just this session: pressing Lock means
-        "close the notes", and leaving another browser holding the key would not
-        be that.
-        """
-        from flask import current_app
-        sessions_of(current_app).lock_all()
-        cookie.clear()
-        return redirect(url_for("sign_in"))
-
-    @app.get("/")
-    def home():
-        from flask import current_app
-        return render_template("home.html", caller=g.caller)
-
-    @app.get("/status")
-    def status():
-        """What is unlocked, for a person and for `doctor`."""
-        from flask import current_app
-        info = sessions_of(current_app).info(cookie.get("sid"))
-        return {
-            "signed_in": info is not None,
-            "caller": g.caller.login,
-            "sessions_open": len(sessions_of(current_app)),
-            "memory_locked": info.memory_locked if info else None,
-            "database_present": notes_db_path().exists(),
-        }
+def _register_errors(app: Flask) -> None:
 
     @app.errorhandler(403)
     def forbidden(exc):
@@ -255,6 +137,17 @@ def _register_routes(app: Flask) -> None:
     def bad_request(exc):
         return render_template("error.html", title="That did not work",
                                message=getattr(exc, "description", "")), 400
+
+    @app.errorhandler(404)
+    def not_found(exc):
+        return render_template("error.html", title="No such page",
+                               message="That address is not part of Counselog."), 404
+
+    @app.errorhandler(413)
+    def too_large(exc):
+        return render_template(
+            "error.html", title="That was too big",
+            message="Notes are text. Split a very long one into a few."), 413
 
     @app.errorhandler(500)
     def server_error(exc):

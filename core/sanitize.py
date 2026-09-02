@@ -44,7 +44,7 @@ def sanitize(text: str) -> str:
     if not text:
         return ""
 
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = normalize_newlines(text)
 
     cleaned = []
     for char in text:
@@ -57,6 +57,23 @@ def sanitize(text: str) -> str:
         cleaned.append(char)
 
     return unicodedata.normalize("NFC", "".join(cleaned))
+
+
+def normalize_newlines(text: str) -> str:
+    """One spelling of "new line", everywhere.
+
+    Split out of `sanitize` because it is also the *only* transformation a
+    browser is asked to reproduce. A form submission rewrites every newline in a
+    textarea as CRLF on its way to the server, so a browser stamping the text it
+    holds and a server checking the text it received would disagree about every
+    multi-line note. Both sides normalise first, and this is the definition they
+    share — see `web/static/capture.js`.
+
+    Classic-Mac CR-only line endings are handled too, and the order matters: CRLF
+    must be collapsed before a bare CR is replaced, or every CRLF would become
+    two newlines.
+    """
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 def describe_changes(original: str, cleaned: str) -> str | None:

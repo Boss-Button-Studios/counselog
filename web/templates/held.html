@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Held for review · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Held for review</h1>
+
+  <p class="aside">
+    Anything written while locked that did not pass its checks is listed here
+    instead of being filed. It is not in your notes, and it is not counted in
+    any report. The text is not kept: an entry that failed its checks has not
+    earned a place in the record.
+  </p>
+
+  {% if waiting %}
+    <ul class="rows">
+      {% for row in waiting %}
+        <li>
+          <div>
+            <strong>{{ row.reason }}</strong>
+            <span class="aside">
+              position {{ row.seq }} ·
+              from <span class="mono">{{ row.device_id }}</span> ·
+              written {{ row.received_at }} ·
+              noticed {{ row.noticed_at }}
+            </span>
+          </div>
+          <form method="post" class="inline"
+                action="{{ url_for('acknowledge_held', seq=row.seq) }}">
+            <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+            <button type="submit" class="quiet">Mark seen</button>
+          </form>
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="aside">
+      Marking one seen hides it from this list. The record of it stays, because
+      it is the evidence that something wrote to the spool that should not have.
+    </p>
+  {% else %}
+    <p>Nothing is being held. Everything written while locked has passed its
+       checks.</p>
+  {% endif %}
+
+  {% if seen %}
+    <h2>Already seen</h2>
+    <ul class="rows">
+      {% for row in seen %}
+        <li>
+          <div>
+            <strong>{{ row.reason }}</strong>
+            <span class="aside">
+              position {{ row.seq }} ·
+              from <span class="mono">{{ row.device_id }}</span> ·
+              seen {{ row.acknowledged_at }}
+            </span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('device_list') }}">Browsers</a> ·
+    <a href="{{ url_for('home') }}">Back to writing</a>
+  </p>
+
+{% endblock %}

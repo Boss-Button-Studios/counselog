@@ -50,6 +50,15 @@ GENESIS = chain.GENESIS_HASH
 MAX_NOTE_CHARS = 100_000
 
 SPOOL_SCHEMA = """
+-- A random name for this file, given when it is created and never changed. It
+-- is what lets the unlocked server tell "the same spool, further along" from "a
+-- different spool with the same shape" — which decides whether re-reading from
+-- the start would recover notes or file the same ones twice.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS entries (
     seq         INTEGER PRIMARY KEY AUTOINCREMENT,
     ciphertext  BLOB NOT NULL,
@@ -79,11 +88,19 @@ class SpoolEntry:
 
 @dataclass(frozen=True)
 class DrainedNote:
-    """A note recovered from the spool and shown to be genuine."""
+    """A note recovered from the spool and shown to be genuine.
+
+    Two times, deliberately. `claimed_at` is what the writing device said, and
+    is covered by its stamp so it cannot be moved afterwards. `received_at` is
+    when this machine took the note in. They are kept apart because a phone's
+    clock is a phone's clock: the note is filed under the one clock we control,
+    and a device that disagrees with it can be shown rather than believed.
+    """
 
     seq: int
     text: str
-    captured_at: str
+    claimed_at: str
+    received_at: str
     device_id: str
 
 
@@ -119,6 +136,17 @@ def new_identity() -> tuple[bytes, bytes]:
     )
 
 
+def public_of(private_key: bytes) -> bytes:
+    """The public half of a stored private key.
+
+    Used to check that the published public key still belongs to the private one
+    inside the database. If it does not, something replaced the file that the
+    locked server seals to.
+    """
+    return X25519PrivateKey.from_private_bytes(private_key).public_key().public_bytes(
+        encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw)
+
+
 def _derive(shared: bytes, ephemeral_public: bytes) -> bytes:
     return HKDF(algorithm=hashes.SHA256(), length=32,
                 salt=ephemeral_public, info=SEAL_INFO).derive(shared)
@@ -150,25 +178,48 @@ def unseal(private_key: bytes, sealed: bytes) -> bytes:
     return AESGCM(_derive(shared, ephemeral_public)).decrypt(nonce, body, SEAL_INFO)
 
 
-# ── what a device signs ──────────────────────────────────────────────────────
+# ── what a device stamps ─────────────────────────────────────────────────────
 
 
-def canonical_capture(text: str, captured_at: str, device_id: str) -> bytes:
-    """The exact bytes a device stamps.
+def stamped_bytes(text: str, captured_at: str, device_id: str) -> bytes:
+    """The exact bytes a device stamps with its key.
 
     Covers when and where as well as what, so an entry cannot be lifted from one
-    device's history and replayed as another's, nor have its timestamp moved.
+    device's history and replayed as another's, nor have its timestamp moved
+    after the fact.
+
+    Length-prefixed rather than JSON, and that choice is load-bearing. These
+    bytes are the one thing in Counselog produced in a browser and checked in
+    Python, so two languages have to agree on them exactly. JSON does not give
+    that: implementations differ on how they escape control characters and lone
+    surrogates, and on whether they escape non-ASCII at all. A disagreement
+    would quarantine a genuine note and look like tampering. Four bytes of
+    length in front of each UTF-8 field is something any language reproduces
+    byte for byte (Law 7). `tests/test_web_capture.py` checks the browser's
+    encoder against this one.
     """
-    payload = json.dumps(
-        {"text": text, "captured_at": captured_at, "device_id": device_id},
-        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-    )
-    return payload.encode("utf-8")
+    return b"".join(chain.length_prefixed(part.encode("utf-8"))
+                    for part in (text, captured_at, device_id))
 
 
 def device_mac(secret: bytes, text: str, captured_at: str, device_id: str) -> bytes:
-    return hmac.new(secret, canonical_capture(text, captured_at, device_id),
+    return hmac.new(secret, stamped_bytes(text, captured_at, device_id),
                     hashlib.sha256).digest()
+
+
+# ── what is sealed ───────────────────────────────────────────────────────────
+
+
+def sealed_payload(text: str, captured_at: str, device_id: str) -> bytes:
+    """The note as it is put into the envelope.
+
+    Sealed here and opened here — no browser ever writes or reads these bytes —
+    so JSON is safe and readable, unlike the stamp above.
+    """
+    return json.dumps(
+        {"text": text, "captured_at": captured_at, "device_id": device_id},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
 
 
 # ── the file ─────────────────────────────────────────────────────────────────
@@ -186,10 +237,24 @@ def connect(path: Path | str) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
     conn.executescript(SPOOL_SCHEMA)
+    conn.execute("INSERT OR IGNORE INTO meta (key, value) VALUES ('spool_id', ?)",
+                 (os.urandom(16).hex(),))
     conn.commit()
     if path.exists():
         os.chmod(path, 0o600)
     return conn
+
+
+def identity(conn: sqlite3.Connection) -> str:
+    """This file's random name. Empty only for a spool written before names."""
+    row = conn.execute("SELECT value FROM meta WHERE key = 'spool_id'").fetchone()
+    return row["value"] if row else ""
+
+
+def hash_at(conn: sqlite3.Connection, seq: int) -> str | None:
+    """The hash recorded at one position, or None if there is nothing there."""
+    row = conn.execute("SELECT entry_hash FROM entries WHERE seq = ?", (seq,)).fetchone()
+    return row["entry_hash"] if row else None
 
 
 def head(conn: sqlite3.Connection) -> tuple[int, str]:
@@ -207,14 +272,14 @@ def append(conn: sqlite3.Connection, public_key: bytes, *, text: str,
     if len(text) > MAX_NOTE_CHARS:
         raise SpoolError("That note is too long.")
 
-    plaintext = canonical_capture(text, captured_at, device_id)
+    plaintext = sealed_payload(text, captured_at, device_id)
     ciphertext = seal(public_key, plaintext)
     _, prev_hash = head(conn)
     entry_hash = hashlib.sha256(
-        chain._field(prev_hash.encode("ascii"))
-        + chain._field(ciphertext)
-        + chain._field(mac)
-        + chain._field(device_id.encode("utf-8"))
+        chain.length_prefixed(prev_hash.encode("ascii"))
+        + chain.length_prefixed(ciphertext)
+        + chain.length_prefixed(mac)
+        + chain.length_prefixed(device_id.encode("utf-8"))
     ).hexdigest()
 
     with conn:
@@ -237,10 +302,10 @@ def entries_after(conn: sqlite3.Connection, seq: int) -> list[SpoolEntry]:
 
 def recompute_hash(entry: SpoolEntry) -> str:
     return hashlib.sha256(
-        chain._field(entry.prev_hash.encode("ascii"))
-        + chain._field(entry.ciphertext)
-        + chain._field(entry.mac)
-        + chain._field(entry.device_id.encode("utf-8"))
+        chain.length_prefixed(entry.prev_hash.encode("ascii"))
+        + chain.length_prefixed(entry.ciphertext)
+        + chain.length_prefixed(entry.mac)
+        + chain.length_prefixed(entry.device_id.encode("utf-8"))
     ).hexdigest()
 
 
@@ -313,7 +378,8 @@ def drain(
                 "was not written by the device it claims to be from"))
             continue
 
-        accepted.append(DrainedNote(seq=entry.seq, text=text,
-                                    captured_at=captured_at, device_id=device_id))
+        accepted.append(DrainedNote(seq=entry.seq, text=text, claimed_at=captured_at,
+                                    received_at=entry.received_at,
+                                    device_id=device_id))
 
     return accepted, quarantined

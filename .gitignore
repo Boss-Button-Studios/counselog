@@ -17,6 +17,10 @@ certs/*
 # DEK wrappers: no plaintext secrets, but per-install and not shareable
 keyring.json
 
+# The spool's public key. Harmless to disclose — it can only be used to write —
+# but it belongs to one install and means nothing anywhere else.
+spool.pub
+
 # SQLCipher databases and their journals
 *.db
 *.db-wal

@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class DatabaseError(Exception):
@@ -152,8 +152,6 @@ BEGIN
     SELECT RAISE(ABORT, 'The note chain cannot be edited.');
 END;
 
--- Signatures over a chain head (phase 7). Stored now so signing needs no
--- migration of a live encrypted database later.
 -- Devices allowed to write notes while the database is locked. Each holds a
 -- random key, kept in that browser, used to prove a spooled note came from it.
 -- The verifying copy lives here, inside the encrypted database, so only an
@@ -176,6 +174,22 @@ CREATE TABLE spool_identity (
     created_at  TEXT NOT NULL
 );
 
+-- Spooled entries that failed a check at drain time. Kept rather than merely
+-- reported: an entry that fails is evidence someone wrote to the spool who
+-- should not have, and evidence that evaporates when the service restarts is
+-- not evidence. The text is deliberately not stored — an entry that failed its
+-- checks has not earned a place in the record.
+CREATE TABLE spool_quarantine (
+    seq             INTEGER PRIMARY KEY,   -- position in the spool it came from
+    device_id       TEXT NOT NULL,
+    reason          TEXT NOT NULL,
+    received_at     TEXT NOT NULL,         -- when the locked server took it in
+    noticed_at      TEXT NOT NULL,         -- when the unlocked server caught it
+    acknowledged_at TEXT                   -- set when the user has seen it
+);
+
+-- Signatures over a chain head (phase 7). Stored now so signing needs no
+-- migration of a live encrypted database later.
 CREATE TABLE signatures (
     id         INTEGER PRIMARY KEY,
     covers_seq INTEGER NOT NULL REFERENCES note_chain(seq),
@@ -192,6 +206,16 @@ CREATE TABLE signatures (
 # chain — altering a hashed field during a migration would make every note after
 # it look tampered with.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
+    3: (
+        """CREATE TABLE spool_quarantine (
+               seq             INTEGER PRIMARY KEY,
+               device_id       TEXT NOT NULL,
+               reason          TEXT NOT NULL,
+               received_at     TEXT NOT NULL,
+               noticed_at      TEXT NOT NULL,
+               acknowledged_at TEXT
+           )""",
+    ),
     2: (
         "ALTER TABLE people ADD COLUMN pronouns TEXT",
         """CREATE TABLE devices (

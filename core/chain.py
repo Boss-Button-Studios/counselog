@@ -77,13 +77,16 @@ class VerifyResult:
         return not self.breaks
 
 
-def _field(value: bytes) -> bytes:
+def length_prefixed(value: bytes) -> bytes:
     """Length-prefix one field.
 
     Concatenating fields with a separator would be ambiguous: a note whose text
     contains the separator could be made to hash the same as a different note
     with different field boundaries. A four-byte length in front of each field
     removes that whole class of problem.
+
+    Public because the spool hashes and the device stamp are built the same way,
+    and one encoding used everywhere is one encoding to get right.
     """
     return struct.pack(">I", len(value)) + value
 
@@ -112,7 +115,7 @@ def canonical_note(
         source_trust.encode("utf-8"),
         raw_text.encode("utf-8"),
     )
-    return b"".join(_field(part) for part in parts)
+    return b"".join(length_prefixed(part) for part in parts)
 
 
 def body_hash(**note_fields: object) -> str:
@@ -123,7 +126,8 @@ def body_hash(**note_fields: object) -> str:
 def link_hash(prev_hash: str, body: str) -> str:
     """SHA-256 binding a note's body to everything that came before it."""
     return hashlib.sha256(
-        _field(prev_hash.encode("ascii")) + _field(body.encode("ascii"))
+        length_prefixed(prev_hash.encode("ascii"))
+        + length_prefixed(body.encode("ascii"))
     ).hexdigest()
 
 
