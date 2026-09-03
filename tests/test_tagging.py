@@ -10,7 +10,7 @@ import secrets
 import httpx
 import pytest
 
-from core import db, models, protocol
+from core import db, models, protocol, tags
 from desktop import tagger
 from desktop.tagger import KnownPerson, Tag, TaggingUnavailable
 
@@ -172,8 +172,8 @@ def test_aliases_alone_when_the_model_is_switched_off(monkeypatch):
 def test_tags_are_stored_and_the_note_marked_processed(conn):
     models.add_person(conn, "Sarah K.", ["Sarah"])
     note = models.add_note(conn, "Sarah was there")
-    models.set_tags(conn, note.id, [("person:1", None), ("team", 0.8)])
-    assert dict(models.tags_for_note(conn, note.id)) == {"person:1": None, "team": 0.8}
+    tags.set_tags(conn, note.id, [("person:1", None), ("team", 0.8)])
+    assert dict(tags.tags_for_note(conn, note.id)) == {"person:1": None, "team": 0.8}
     assert models.get_note(conn, note.id).processed
 
 
@@ -181,17 +181,17 @@ def test_retagging_replaces_rather_than_accumulates(conn):
     """Fixing an alias and running again should converge, not pile up bins."""
     models.add_person(conn, "Sarah K.", ["Sarah"])
     note = models.add_note(conn, "a note")
-    models.set_tags(conn, note.id, [("team", 0.6)])
-    models.set_tags(conn, note.id, [("self", 0.9)])
-    assert [k for k, _ in models.tags_for_note(conn, note.id)] == ["self"]
+    tags.set_tags(conn, note.id, [("team", 0.6)])
+    tags.set_tags(conn, note.id, [("self", 0.9)])
+    assert [k for k, _ in tags.tags_for_note(conn, note.id)] == ["self"]
 
 
 def test_tagging_does_not_disturb_the_chain(conn):
     """Tags live outside the hashed note body, so re-tagging is always safe."""
     models.add_person(conn, "Sarah K.", ["Sarah"])
     note = models.add_note(conn, "Sarah was there")
-    models.set_tags(conn, note.id, [("person:1", None)])
-    models.set_tags(conn, note.id, [("team", 0.5)])
+    tags.set_tags(conn, note.id, [("person:1", None)])
+    tags.set_tags(conn, note.id, [("team", 0.5)])
     assert models.verify(conn).ok
 
 
@@ -205,10 +205,10 @@ def test_bin_keys_survive_differing_local_ids(tmp_path):
         # The mirror receives them in the other order, so ids differ locally.
         models.upsert_person(desktop, 2, "Bob", [], True, "t")
         models.upsert_person(desktop, 1, "Alice", [], True, "t")
-        assert models.bin_id_for_key(laptop, "person:1") != \
-               models.bin_id_for_key(desktop, "person:1") or True
+        assert tags.bin_id_for_key(laptop, "person:1") != \
+               tags.bin_id_for_key(desktop, "person:1") or True
         # What matters: the key resolves to the right person on both.
-        assert models.bin_key_for_id(desktop, models.bin_id_for_key(desktop, "person:1")) \
+        assert tags.bin_key_for_id(desktop, tags.bin_id_for_key(desktop, "person:1")) \
                == "person:1"
     finally:
         laptop.close()
@@ -217,9 +217,9 @@ def test_bin_keys_survive_differing_local_ids(tmp_path):
 
 def test_an_unknown_bin_key_is_refused(conn):
     with pytest.raises(models.ModelError):
-        models.bin_id_for_key(conn, "person:999")
+        tags.bin_id_for_key(conn, "person:999")
     with pytest.raises(models.ModelError):
-        models.bin_id_for_key(conn, "nonsense")
+        tags.bin_id_for_key(conn, "nonsense")
 
 
 # ── review ───────────────────────────────────────────────────────────────────
@@ -230,24 +230,24 @@ def test_only_uncertain_guesses_need_review(conn):
     either — otherwise the list is too long to actually work through."""
     models.add_person(conn, "Sarah K.", ["Sarah"])
     note = models.add_note(conn, "a note")
-    models.set_tags(conn, note.id, [("person:1", None), ("team", 0.95), ("self", 0.4)])
-    pending = models.tags_needing_review(conn, 0.75)
+    tags.set_tags(conn, note.id, [("person:1", None), ("team", 0.95), ("self", 0.4)])
+    pending = tags.tags_needing_review(conn, 0.75)
     assert [key for _, key, _ in pending] == ["self"]
 
 
 def test_confirming_a_guess_settles_it(conn):
     note = models.add_note(conn, "a note")
-    models.set_tags(conn, note.id, [("team", 0.4)])
-    models.confirm_tag(conn, note.id, "team")
-    assert models.tags_needing_review(conn, 0.75) == []
-    assert dict(models.tags_for_note(conn, note.id))["team"] == 1.0
+    tags.set_tags(conn, note.id, [("team", 0.4)])
+    tags.confirm_tag(conn, note.id, "team")
+    assert tags.tags_needing_review(conn, 0.75) == []
+    assert dict(tags.tags_for_note(conn, note.id))["team"] == 1.0
 
 
 def test_rejecting_a_guess_removes_it(conn):
     note = models.add_note(conn, "a note")
-    models.set_tags(conn, note.id, [("team", 0.4), ("self", 0.9)])
-    models.reject_tag(conn, note.id, "team")
-    assert [k for k, _ in models.tags_for_note(conn, note.id)] == ["self"]
+    tags.set_tags(conn, note.id, [("team", 0.4), ("self", 0.9)])
+    tags.reject_tag(conn, note.id, "team")
+    assert [k for k, _ in tags.tags_for_note(conn, note.id)] == ["self"]
 
 
 def test_unprocessed_notes_exclude_tombstoned_ones(conn):

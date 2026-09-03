@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 from werkzeug.serving import make_server
 
-from core import db, models
+from core import db, models, tags
 from core.certs import CertPaths, server_context
 from core.crypto import Keyring, PasswordFactor
 from core.paths import keyring_path, notes_db_path
@@ -84,7 +84,7 @@ def test_a_named_person_is_tagged(ready, monkeypatch):
 
     conn = _open()
     try:
-        assert dict(models.tags_for_note(conn, 1)) == {"person:1": None}
+        assert dict(tags.tags_for_note(conn, 1)) == {"person:1": None}
     finally:
         conn.close()
 
@@ -192,8 +192,8 @@ def test_keeping_a_guess_settles_it(ready, monkeypatch):
 
     conn = _open()
     try:
-        assert dict(models.tags_for_note(conn, 1))["team"] == 1.0
-        assert models.tags_needing_review(conn, 0.75) == []
+        assert dict(tags.tags_for_note(conn, 1))["team"] == 1.0
+        assert tags.tags_needing_review(conn, 0.75) == []
     finally:
         conn.close()
 
@@ -207,7 +207,7 @@ def test_rejecting_a_guess_removes_it(ready, monkeypatch):
 
     conn = _open()
     try:
-        assert models.tags_for_note(conn, 1) == []
+        assert tags.tags_for_note(conn, 1) == []
     finally:
         conn.close()
 
@@ -224,7 +224,7 @@ def test_review_can_be_stopped_part_way(ready, monkeypatch):
     assert "still waiting" in result.output
     conn = _open()
     try:
-        assert len(models.tags_needing_review(conn, 0.75)) == 1
+        assert len(tags.tags_needing_review(conn, 0.75)) == 1
     finally:
         conn.close()
 

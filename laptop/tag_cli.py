@@ -13,7 +13,7 @@ import time
 
 import click
 
-from core import db, models
+from core import db, models, tags
 from core.paths import notes_db_path
 from desktop import mirror, tagger
 from laptop.client import DesktopClient, TransportError
@@ -103,7 +103,7 @@ def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None) 
                 break
 
             note_tags = _parse(answer).get(note.id, [])
-            models.set_tags(conn, note.id, note_tags)
+            tags.set_tags(conn, note.id, note_tags)
             if not note_tags:
                 untagged.append(note.id)
             done += 1
@@ -155,7 +155,7 @@ def _summarise(conn, done: int, total: int, untagged: list[int]) -> None:
     else:
         click.secho(f"Sorted all {done} note(s).", fg="green")
 
-    unsure = models.tags_needing_review(conn, tagger.DEFAULT_THRESHOLD)
+    unsure = tags.tags_needing_review(conn, tagger.DEFAULT_THRESHOLD)
     if unsure:
         click.echo(f"{len(unsure)} guess(es) the model was unsure about. "
                    "Check them with `counselog review`.")
@@ -174,9 +174,9 @@ def _summarise(conn, done: int, total: int, untagged: list[int]) -> None:
 def _describe(conn, key: str, confidence: float | None) -> str:
     """Name a bin the way a person thinks of it, not by its key."""
     label = key
-    if key.startswith(models.PERSON_PREFIX):
+    if key.startswith(tags.PERSON_PREFIX):
         try:
-            label = models.get_person(conn, int(key[len(models.PERSON_PREFIX):])).display_name
+            label = models.get_person(conn, int(key[len(tags.PERSON_PREFIX):])).display_name
         except models.ModelError:
             pass
     if confidence is None:
@@ -198,7 +198,7 @@ def review(threshold: float, unlock_with: str | None) -> None:
 
     conn = open_database(unlock_with)
     try:
-        pending = models.tags_needing_review(conn, threshold)
+        pending = tags.tags_needing_review(conn, threshold)
         if not pending:
             click.secho("Nothing to check.", fg="green")
             return
@@ -214,9 +214,9 @@ def review(threshold: float, unlock_with: str | None) -> None:
                 click.echo("Stopped. The rest are still waiting.")
                 return
             if choice == "y":
-                models.confirm_tag(conn, note.id, key)
+                tags.confirm_tag(conn, note.id, key)
             else:
-                models.reject_tag(conn, note.id, key)
+                tags.reject_tag(conn, note.id, key)
             click.echo()
         click.secho("All checked.", fg="green")
     finally:

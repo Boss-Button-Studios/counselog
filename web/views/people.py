@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from flask import g, redirect, render_template, request, url_for
 
-from core import models
+from core import models, tags
 from web.access import open_database, requires_unlock
 
 def register(app) -> None:
@@ -163,7 +163,7 @@ def _no_such_person():
 def _note_count(conn, person_id: int) -> int:
     """How much has been written about them, so a status change is informed."""
     try:
-        return len(models.notes_for_bin(conn, f"person:{person_id}"))
+        return len(tags.notes_for_bin(conn, f"person:{person_id}"))
     except models.ModelError:
         return 0
 

@@ -24,7 +24,7 @@ from dataclasses import dataclass
 
 import sqlcipher3
 
-from core import models
+from core import models, tags
 from core.sanitize import sanitize
 
 
@@ -81,7 +81,7 @@ def revise(conn, note_id: int, new_text: str) -> models.Note:
     if cleaned == original.raw_text:
         raise RevisionError("That is the same text the note already has.")
 
-    carried = models.tags_for_note(conn, note_id)
+    carried = tags.tags_for_note(conn, note_id)
     try:
         revision = models.add_note(
             conn, new_text,
@@ -98,7 +98,7 @@ def revise(conn, note_id: int, new_text: str) -> models.Note:
         ) from exc
 
     if carried:
-        models.set_tags(conn, revision.id, carried)
+        tags.set_tags(conn, revision.id, carried)
         # set_tags marks a note processed; this one is not. The bins it
         # inherited are a stand-in until tagging sees the new text.
         with conn:

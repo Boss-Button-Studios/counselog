@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from flask import g, redirect, render_template, request, url_for
 
-from core import models, revisions
+from core import models, revisions, tags
 from web.access import open_database, requires_unlock
 
 
@@ -149,7 +149,7 @@ def _labelled_tags(conn, note_id: int) -> list[tuple[str, float | None]]:
     page, so it is resolved here.
     """
     labelled = []
-    for key, confidence in models.tags_for_note(conn, note_id):
+    for key, confidence in tags.tags_for_note(conn, note_id):
         if key.startswith("person:"):
             try:
                 label = models.get_person(conn, int(key.split(":", 1)[1])).display_name

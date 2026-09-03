@@ -13,7 +13,7 @@ behind a fabricated revision with `verify` still reporting clean.
 
 import pytest
 
-from core import chain, db, models, revisions
+from core import chain, db, models, revisions, tags
 from core.revisions import RevisionError
 
 KEY = bytes(range(32))
@@ -135,17 +135,17 @@ def test_a_thread_sits_where_the_original_was_written(conn):
 def test_a_correction_stays_in_the_bins_the_original_was_in(conn, note):
     """Otherwise a note vanishes from its reports the moment it is corrected."""
     models.add_person(conn, "Ada L.", aliases=["Ada"])
-    models.set_tags(conn, note.id, [("self", None), ("person:1", 0.9)])
+    tags.set_tags(conn, note.id, [("self", None), ("person:1", 0.9)])
 
     revised = revisions.revise(conn, note.id, "Ada pushed back on the timeline.")
-    assert {key for key, _ in models.tags_for_note(conn, revised.id)} == {
+    assert {key for key, _ in tags.tags_for_note(conn, revised.id)} == {
         "self", "person:1"}
-    assert [n.id for n in models.notes_for_bin(conn, "person:1")] == [revised.id]
+    assert [n.id for n in tags.notes_for_bin(conn, "person:1")] == [revised.id]
 
 
 def test_a_correction_is_queued_for_tagging_again(conn, note):
     """The text changed, so which bins it belongs in may have changed too."""
-    models.set_tags(conn, note.id, [("self", None)])
+    tags.set_tags(conn, note.id, [("self", None)])
     revised = revisions.revise(conn, note.id, "actually this was about the team")
     assert [n.id for n in models.unprocessed_notes(conn)] == [revised.id]
 
@@ -156,11 +156,11 @@ def test_the_review_queue_asks_about_the_current_note_only(conn, note):
     You would be asked the same question twice, once about text that is no
     longer in the record — and answering the stale one would change nothing.
     """
-    models.set_tags(conn, note.id, [("team", 0.4)])
+    tags.set_tags(conn, note.id, [("team", 0.4)])
     revised = revisions.revise(conn, note.id, "Ada pushed back on the timeline.")
-    models.set_tags(conn, revised.id, [("team", 0.4)])
+    tags.set_tags(conn, revised.id, [("team", 0.4)])
 
-    queued = models.tags_needing_review(conn, 0.7)
+    queued = tags.tags_needing_review(conn, 0.7)
     assert [n.id for n, _, _ in queued] == [revised.id]
 
 

@@ -16,7 +16,7 @@ import re
 import pytest
 from click.testing import CliRunner
 
-from core import db, models
+from core import db, models, tags
 from core.crypto import Keyring, PasswordFactor
 from core.paths import keyring_path, notes_db_path
 from laptop.cli import cli
@@ -295,7 +295,7 @@ def test_their_old_notes_stay_readable(client, dek, ada):
     conn = db.connect(notes_db_path(), dek)
     try:
         note = models.add_note(conn, "Ada pushed back on the timeline.")
-        models.set_tags(conn, note.id, [(f"person:{ada.id}", None)])
+        tags.set_tags(conn, note.id, [(f"person:{ada.id}", None)])
     finally:
         conn.close()
 
@@ -303,7 +303,7 @@ def test_their_old_notes_stay_readable(client, dek, ada):
 
     conn = db.connect(notes_db_path(), dek)
     try:
-        assert len(models.notes_for_bin(conn, f"person:{ada.id}")) == 1
+        assert len(tags.notes_for_bin(conn, f"person:{ada.id}")) == 1
     finally:
         conn.close()
 

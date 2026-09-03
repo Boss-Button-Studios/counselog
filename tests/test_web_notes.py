@@ -10,7 +10,7 @@ by accident or by anyone who has not unlocked the notes.
 import pytest
 from click.testing import CliRunner
 
-from core import db, models
+from core import db, models, tags
 from core.crypto import Keyring, PasswordFactor
 from core.display import friendly_time, preview
 from core.paths import keyring_path, notes_db_path
@@ -142,7 +142,7 @@ def test_a_tag_matched_by_name_is_not_dressed_up_as_a_guess(client, written, dek
     conn = db.connect(notes_db_path(), dek)
     try:
         models.add_person(conn, "Ada L.", aliases=["Ada"])
-        models.set_tags(conn, first.id, [("self", None), ("person:1", 0.9)])
+        tags.set_tags(conn, first.id, [("self", None), ("person:1", 0.9)])
     finally:
         conn.close()
 
