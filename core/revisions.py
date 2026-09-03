@@ -68,7 +68,9 @@ def revise(conn, note_id: int, new_text: str) -> models.Note:
 
     Tags are carried over so the note does not drop out of its bins the moment
     it is corrected, but it is left unprocessed so tagging revisits it — the
-    text changed, so the bins may need to.
+    text changed, so the bins may need to. Carried over *with their provenance*:
+    a judgment you made about the original is still your judgment about the
+    correction, and sorting will leave it alone.
     """
     original = models.get_note(conn, note_id)
     if original.tombstoned:
@@ -81,7 +83,6 @@ def revise(conn, note_id: int, new_text: str) -> models.Note:
     if cleaned == original.raw_text:
         raise RevisionError("That is the same text the note already has.")
 
-    carried = tags.tags_for_note(conn, note_id)
     try:
         revision = models.add_note(
             conn, new_text,
@@ -97,12 +98,11 @@ def revise(conn, note_id: int, new_text: str) -> models.Note:
             "That note has already been corrected. Edit the correction instead."
         ) from exc
 
-    if carried:
-        tags.set_tags(conn, revision.id, carried)
-        # set_tags marks a note processed; this one is not. The bins it
-        # inherited are a stand-in until tagging sees the new text.
-        with conn:
-            conn.execute("UPDATE notes SET processed = 0 WHERE id = ?", (revision.id,))
+    # Deliberately not via `set_tags`: that would mark the note processed and
+    # relabel a person's decision as the model's. The correction keeps every
+    # answer already given about it and still queues for sorting, because the
+    # machine's time is what it is there for.
+    tags.carry_forward(conn, note_id, revision.id)
     return models.get_note(conn, revision.id)
 
 

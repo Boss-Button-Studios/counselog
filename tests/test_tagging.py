@@ -236,11 +236,20 @@ def test_only_uncertain_guesses_need_review(conn):
 
 
 def test_confirming_a_guess_settles_it(conn):
+    """Settled means recorded as yours, not recorded as a very confident guess.
+
+    It used to write a confidence of 1.0, which read back exactly like a model
+    that happened to sound certain — so nothing could tell a decision from a
+    guess afterwards.
+    """
     note = models.add_note(conn, "a note")
     tags.set_tags(conn, note.id, [("team", 0.4)])
     tags.confirm_tag(conn, note.id, "team")
+
     assert tags.tags_needing_review(conn, 0.75) == []
-    assert dict(tags.tags_for_note(conn, note.id))["team"] == 1.0
+    assert "team" in dict(tags.tags_for_note(conn, note.id))
+    decided = {d.key: d for d in tags.tag_decisions(conn, note.id)}["team"]
+    assert decided.checked and decided.confidence is None
 
 
 def test_rejecting_a_guess_removes_it(conn):

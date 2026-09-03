@@ -192,7 +192,9 @@ def test_keeping_a_guess_settles_it(ready, monkeypatch):
 
     conn = _open()
     try:
-        assert dict(tags.tags_for_note(conn, 1))["team"] == 1.0
+        assert "team" in dict(tags.tags_for_note(conn, 1))
+        decided = {d.key: d for d in tags.tag_decisions(conn, 1)}["team"]
+        assert decided.checked, "keeping a guess records that you looked"
         assert tags.tags_needing_review(conn, 0.75) == []
     finally:
         conn.close()

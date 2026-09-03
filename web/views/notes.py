@@ -141,24 +141,26 @@ def _no_such_note():
                            message="That note is not in your record."), 404
 
 
-def _labelled_tags(conn, note_id: int) -> list[tuple[str, float | None]]:
-    """Bin keys as names a person recognises.
+def _labelled_tags(conn, note_id: int) -> list[dict]:
+    """Decisions about a note, as names a person recognises.
 
     Tags travel by stable key — 'self', 'team', 'person:<id>' — because bin ids
     can differ between machines. That is right for the wire and useless on a
-    page, so it is resolved here.
+    page, so it is resolved here, along with who decided.
     """
-    labelled = []
-    for key, confidence in tags.tags_for_note(conn, note_id):
-        if key.startswith("person:"):
+    shown = []
+    for decision in tags.tag_decisions(conn, note_id):
+        label = decision.key
+        if decision.key.startswith(tags.PERSON_PREFIX):
             try:
-                label = models.get_person(conn, int(key.split(":", 1)[1])).display_name
+                person_id = int(decision.key[len(tags.PERSON_PREFIX):])
+                label = models.get_person(conn, person_id).display_name
             except (ValueError, models.ModelError):
-                label = key  # a bin whose person is gone: show the raw key
-        else:
-            label = key
-        labelled.append((label, confidence))
-    return labelled
+                pass  # a bin whose person is gone: show the raw key
+        shown.append({"label": label, "confidence": decision.confidence,
+                      "decided_by": decision.decided_by,
+                      "included": decision.included, "checked": decision.checked})
+    return shown
 
 
 __all__ = ["register"]

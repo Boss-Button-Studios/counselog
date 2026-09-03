@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 class DatabaseError(Exception):
@@ -127,10 +127,24 @@ BEGIN
     SELECT RAISE(ABORT, 'Notes cannot be deleted, because that would break the record. Clear the text with a tombstone instead.');
 END;
 
+-- Which bin a note is in, and who put it there. The provenance is not
+-- bookkeeping: a corrected note is re-sorted from scratch, so without it a
+-- typo fix would discard a judgment a person made and hand the question back to
+-- the model. It is also what lets a report say how much of what it stands on
+-- someone actually checked, which is the difference between a document that can
+-- be relied on in a difficult conversation and one that cannot.
 CREATE TABLE note_tags (
     note_id    INTEGER NOT NULL REFERENCES notes(id),
     bin_id     INTEGER NOT NULL REFERENCES bins(id),
     confidence REAL,                           -- NULL when matched exactly, not inferred
+    -- 'alias' matched a name literally, 'model' guessed, 'person' decided.
+    decided_by TEXT NOT NULL DEFAULT 'model'
+               CHECK (decided_by IN ('alias', 'model', 'person')),
+    -- A person can decide a note is *not* about something. Recorded rather than
+    -- deleted, or the next tagging run is free to suggest it again and the
+    -- answer has to be given over and over.
+    decision   TEXT NOT NULL DEFAULT 'included'
+               CHECK (decision IN ('included', 'excluded')),
     PRIMARY KEY (note_id, bin_id)
 );
 
@@ -217,6 +231,16 @@ CREATE TABLE signatures (
 # chain — altering a hashed field during a migration would make every note after
 # it look tampered with.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
+    5: (
+        "ALTER TABLE note_tags ADD COLUMN decided_by TEXT NOT NULL DEFAULT 'model'",
+        "ALTER TABLE note_tags ADD COLUMN decision TEXT NOT NULL DEFAULT 'included'",
+        # A NULL confidence has always meant an exact name match, so those rows
+        # can be recovered exactly. Confirmations cannot: `confirm_tag` wrote a
+        # confidence of 1.0, which is indistinguishable from a model that
+        # answered 1.0. They come forward as the model's, which is the honest
+        # reading of what was recorded — the information was never kept.
+        "UPDATE note_tags SET decided_by = 'alias' WHERE confidence IS NULL",
+    ),
     4: (
         "ALTER TABLE notes ADD COLUMN supersedes INTEGER REFERENCES notes(id)",
         """CREATE UNIQUE INDEX notes_one_revision ON notes(supersedes)

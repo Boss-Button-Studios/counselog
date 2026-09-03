@@ -98,21 +98,28 @@
   {% if tags %}
     <h2>Sorted into</h2>
     <ul class="rows">
-      {% for label, confidence in tags %}
+      {% for tag in tags %}
         <li>
           <div>
-            <strong>{{ label }}</strong>
+            <strong>{{ tag.label }}</strong>
+            {% if not tag.included %}<span class="marker">not this one</span>{% endif %}
             <span class="aside">
-              {% if confidence is none %}
+              {% if tag.decided_by == "person" %}
+                you decided{{ " it is not about this" if not tag.included }}
+              {% elif tag.decided_by == "alias" %}
                 matched by name
               {% else %}
-                the model was {{ (confidence * 100) | round | int }}% sure
+                the model was {{ (tag.confidence * 100) | round | int }}% sure
               {% endif %}
             </span>
           </div>
         </li>
       {% endfor %}
     </ul>
+    <p class="aside">
+      Sorting runs again whenever a note is corrected. What you decided stays
+      decided — it is not asked again.
+    </p>
   {% else %}
     <p class="aside">
       Not sorted into any bin yet, so it will not appear in a report.

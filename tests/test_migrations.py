@@ -13,7 +13,7 @@ Each test says which version it is imitating and what that version lacked.
 import pytest
 import sqlcipher3
 
-from core import chain, db, devices, intake, models
+from core import chain, db, devices, intake, models, tags
 
 KEY = bytes(range(32))
 
@@ -35,6 +35,9 @@ def _rewind_to(path, version: int) -> None:
     """Turn a current database into what `version` would have left behind."""
     conn = _raw(path)
     try:
+        if version < 5:
+            conn.execute("ALTER TABLE note_tags DROP COLUMN decided_by")
+            conn.execute("ALTER TABLE note_tags DROP COLUMN decision")
         if version < 4:
             # The index goes first — SQLite will not drop a column an index
             # still refers to. Neither column is last in its table, which also
@@ -136,6 +139,7 @@ def with_a_note(path):
     (1, "pronouns, devices and the spool keypair"),
     (2, "the quarantine"),
     (3, "the revision columns"),
+    (4, "who decided a tag"),
 ])
 def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version,
                                                             missing):
@@ -148,7 +152,7 @@ def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version
         conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3])
+@pytest.mark.parametrize("version", [1, 2, 3, 4])
 def test_the_notes_survive_the_migration(with_a_note, version):
     """The whole point. A migration that loses a note is worse than no tool.
 
@@ -162,6 +166,32 @@ def test_the_notes_survive_the_migration(with_a_note, version):
         stored = models.list_notes(conn)
         assert [note.raw_text for note in stored] == ["Ada pushed back on the timeline."]
         assert models.verify(conn).ok, "the chain must still check out afterwards"
+    finally:
+        conn.close()
+
+
+def test_an_exact_match_survives_the_provenance_migration(with_a_note):
+    """A NULL confidence has always meant a name matched literally.
+
+    Those rows can be recovered exactly. Confirmations cannot — `confirm_tag`
+    used to write 1.0, which is indistinguishable from a model that answered
+    1.0 — so they come forward as the model's. That is the honest reading of
+    what was recorded, and the test says so rather than pretending otherwise.
+    """
+    conn = db.connect(with_a_note, KEY)
+    try:
+        models.add_person(conn, "Ada L.", aliases=["Ada"])
+        tags.set_tags(conn, 1, [("person:1", None), ("team", 1.0)])
+    finally:
+        conn.close()
+
+    _rewind_to(with_a_note, 4)
+    conn = db.connect(with_a_note, KEY)
+    try:
+        by_key = {d.key: d for d in tags.tag_decisions(conn, 1)}
+        assert by_key["person:1"].decided_by == tags.BY_ALIAS, "recoverable"
+        assert by_key["team"].decided_by == tags.BY_MODEL, "not recoverable, and honest"
+        assert all(d.included for d in by_key.values())
     finally:
         conn.close()
 

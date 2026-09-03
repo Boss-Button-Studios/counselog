@@ -693,42 +693,40 @@ Raised while playtesting; recorded so they are not rediscovered later.
   self-authored text; a file arriving from elsewhere is the case that scoping
   was deferring, so this is not purely an interface job.
 
-### Part 3, slice 5 — what a correction does to the sorting ⬜
+### Part 3, slice 5 — who decided a note belongs in a bin ✅ (schema version 5)
+
+`core/tags.py` (extracted from `models.py` first, unchanged, as its own commit),
+`note_tags.decided_by` and `note_tags.decision`, `TagDecision`, `carry_forward`.
 
 **Decided: a corrected note is always re-sorted.** The machine's time is what it
 is there for, and slow local inference is the trade being made deliberately
-rather than a cost to design around. Already the behaviour — `revise` leaves the
-correction unprocessed — so nothing was needed for the decision itself. Worth
-keeping in one obvious place: a user on much weaker hardware might answer
-differently, and that is the line they would want to change.
+rather than a cost to design around. Already the behaviour, so the decision
+needed no code — but it is what made everything below necessary rather than
+tidy, because sorting now runs often enough to trample a person's judgment
+weekly instead of never.
 
-**But that decision makes tag provenance necessary rather than optional.** Every
-correction now re-runs the model, and `set_tags` replaces everything, so today a
-typo fix discards a tag you confirmed and can resurrect one you rejected —
-`reject_tag` deletes the row, so the rejection is recorded nowhere and the model
-is free to suggest it again. Rare enough to ignore when re-tagging was rare;
-weekly once corrections are routine.
+Every row now records who put the note in the bin — a name matched literally,
+the model guessed, or a person decided — and whether the answer was yes or no.
+Re-sorting replaces only the alias and model rows. A person's answer is left
+alone in both directions: a confirmed tag is not handed back to the model, and a
+rejected bin is not quietly reinstated. The model may suggest it again; it may
+not overrule the answer it already got.
 
-Proposed: `note_tags` records who decided — alias, model, or person — and
-whether the decision was to include or exclude. Re-tagging then replaces only
-the alias and model rows and leaves a person's judgment alone, in both
-directions. Schema version 5. No protocol change: the desktop already
-distinguishes an exact match from a guess by sending a NULL confidence, so
-provenance can be settled on the laptop.
+**A rejection is recorded rather than deleted.** `reject_tag` used to delete the
+row, which said nothing at all — so the next sorting run was free to suggest the
+same bin, and the same answer had to be given again every time.
 
-**Reports are the third reason, and the one that matters most.** Decided while
-playtesting: the value of this tool is the parsing, aggregating and reporting,
-and those run on *checked* work. The record cannot currently support that
-sentence. `confirm_tag` writes a confidence of 1.0, which is indistinguishable
-from a model that happened to answer 1.0 — so a digest has no way to say how
-much of what it is built on a person actually looked at. Provenance is what lets
-a report state what it stands on, which is the difference between a document
-someone can rely on in a difficult conversation and one they cannot.
+**`confirm_tag` stopped writing 1.0.** A number where a decision belongs cannot
+be told apart from a model that happened to sound certain, which is exactly why
+confirmations made before this cannot be recovered by the migration. They come
+forward as the model's, and the migration test says so rather than pretending
+otherwise. Exact matches *can* be recovered exactly, because a NULL confidence
+has always meant a name matched literally.
 
-Design note for part 4, following phase 4's hardest lesson: a report should
-*include* unchecked notes and mark them, never quietly leave them out. A note
-that vanishes silently is the failure that was already found once, and in a
-report it would be worse — the reader cannot notice an absence.
+**What this buys the reports.** A digest can now say how much of what it stands
+on a person actually checked. `TagDecision.checked` is deliberately true only
+for a human decision — an exact name match is reliable, but nobody read it, and
+a report that conflated the two would be overstating itself.
 
 ### Part 4 — reports + dashboard ⬜
 
