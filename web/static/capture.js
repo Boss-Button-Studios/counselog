@@ -111,11 +111,29 @@
     element.removeAttribute("data-device-secret");
   }
 
+  /* ── the pronoun field ───────────────────────────────────────────────── */
+
+  /* Typing pronouns means you have them, so say so rather than making the
+     person tick a box to confirm what they just typed. The server refuses the
+     contradiction anyway, which is what makes this an improvement rather than
+     the thing holding the answer together — with scripting off you get told,
+     and nothing you typed is lost. */
+  function wirePronounField(field) {
+    var stated = document.querySelector('input[name="pronoun_state"][value="stated"]');
+    if (!stated) return;
+    field.addEventListener("input", function () {
+      if (field.value.trim()) stated.checked = true;
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var enrolled = document.getElementById("enrolled");
     if (enrolled) completeEnrolment(enrolled);
 
     var form = document.getElementById("capture");
     if (form) wireCaptureForm(form, window.counselogStamp);
+
+    var pronouns = document.getElementById("pronouns");
+    if (pronouns) wirePronounField(pronouns);
   });
 })();

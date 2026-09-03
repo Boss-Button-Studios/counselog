@@ -216,6 +216,46 @@ def test_saying_they_use_something_but_typing_nothing_is_refused(client, dek, ad
     assert person_in(dek, ada.id).pronouns is None, "nothing was recorded"
 
 
+def test_typing_pronouns_without_choosing_them_is_refused(client, dek, ada):
+    """The trap that came with moving the example out of the box.
+
+    Type pronouns, leave "Not asked yet" selected, save — and before this the
+    text was silently discarded. Choosing for the user is not the fix either:
+    filing it as stated would invent an answer, and dropping it throws away one
+    that was given. So it says so.
+    """
+    page = post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
+                pronoun_state="unasked", pronouns="they/them")
+    assert "did not choose" in text_of(page)
+    assert person_in(dek, ada.id).pronouns is None, "nothing invented"
+
+
+def test_a_refused_pronoun_answer_keeps_what_was_typed(client, ada):
+    """A form that empties itself while complaining teaches people to give up."""
+    page = post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
+                pronoun_state="unasked", pronouns="they/them")
+    assert 'value="they/them"' in page.get_data(as_text=True)
+
+
+def test_the_pronoun_example_is_not_ghost_text_in_the_field(client, ada):
+    """A pronoun box that looks pre-filled reads as an assumption about someone.
+
+    Placeholder text is low-contrast, vanishes the moment you type, and here
+    would present a guess at a person's pronouns as though it were recorded.
+    """
+    body = get(client, f"/people/{ada.id}").get_data(as_text=True)
+    assert "placeholder" not in body
+    assert "For example: she/her" in text_of(get(client, f"/people/{ada.id}"))
+
+
+def test_the_pronoun_field_has_a_label_of_its_own(client, ada):
+    """One label cannot name two controls; the box would go unnamed."""
+    body = get(client, f"/people/{ada.id}").get_data(as_text=True)
+    assert 'for="pronouns"' in body
+    assert 'id="pronouns"' in body
+    assert 'aria-describedby="pronoun-examples"' in body
+
+
 def test_editing_a_name_does_not_disturb_recorded_pronouns(client, dek, ada):
     post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
          pronoun_state="stated", pronouns="they/them")

@@ -40,23 +40,36 @@
 
       <label class="choice">
         <input type="radio" name="pronoun_state" value="unasked"
-               {{ "checked" if person.pronouns is none }}>
+               {{ "checked" if state == "unasked" }}>
         Not asked yet
       </label>
 
       <label class="choice">
         <input type="radio" name="pronoun_state" value="stated"
-               {{ "checked" if person.pronouns_known }}>
-        They use
-        <input name="pronouns" type="text" class="inline-field" maxlength="60"
-               autocomplete="off" spellcheck="false"
-               value="{{ person.pronouns if person.pronouns_known else '' }}"
-               placeholder="she/her">
+               {{ "checked" if state == "stated" }}>
+        They told me
       </label>
+
+      {# The text field gets its own label rather than sharing the radio's.
+         One label cannot name two controls: a screen reader would announce
+         "They told me" for the radio and leave this box unnamed. #}
+      <label for="pronouns" class="sub">Pronouns they use</label>
+      <input id="pronouns" name="pronouns" type="text" maxlength="60"
+             autocomplete="off" spellcheck="false"
+             aria-describedby="pronoun-examples"
+             value="{{ typed }}">
+      {# Examples below, never as ghost text in the box. Placeholder text is
+         low-contrast, vanishes the moment you type, and — here especially —
+         reads as a value that is already set. A pronoun field that appears
+         pre-filled with someone's pronouns is exactly the wrong impression to
+         give about a person. #}
+      <p class="aside" id="pronoun-examples">
+        For example: she/her, he/him, they/them — or however they write it.
+      </p>
 
       <label class="choice">
         <input type="radio" name="pronoun_state" value="withheld"
-               {{ "checked" if person.pronouns_withheld }}>
+               {{ "checked" if state == "withheld" }}>
         Asked, and they preferred not to say
       </label>
 

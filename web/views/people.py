@@ -76,8 +76,7 @@ def register(app) -> None:
             person = _find(conn, person_id)
             if person is None:
                 return _no_such_person()
-            return render_template("person.html", caller=g.caller, person=person,
-                                   note_count=_note_count(conn, person_id), error=None)
+            return _person_page(conn, person)
         finally:
             conn.close()
 
@@ -92,13 +91,21 @@ def register(app) -> None:
 
             state = request.form.get("pronoun_state") or NOT_ASKED
             typed = (request.form.get("pronouns") or "").strip()
+
+            # The two ways the answer and the box can disagree. Neither is
+            # allowed to resolve itself quietly: picking one for the user would
+            # mean either inventing an answer nobody gave or throwing away one
+            # they did (Law 6).
+            complaint = None
             if state == STATED and not typed:
-                return render_template(
-                    "person.html", caller=g.caller, person=person,
-                    note_count=_note_count(conn, person_id),
-                    error="Type the pronouns they use, or choose one of the "
-                          "other two answers.",
-                ), 400
+                complaint = ("Type the pronouns they use, or choose one of the "
+                             "other two answers.")
+            elif state != STATED and typed:
+                complaint = ("You typed pronouns but did not choose “They told "
+                             "me”. Choose it to record them, or clear the box.")
+            if complaint:
+                return _person_page(conn, person, error=complaint,
+                                    state=state, typed=typed), 400
 
             try:
                 models.update_person(
@@ -108,10 +115,8 @@ def register(app) -> None:
                     pronouns=_pronouns_from(state, typed),
                 )
             except models.ModelError as exc:
-                return render_template(
-                    "person.html", caller=g.caller, person=person,
-                    note_count=_note_count(conn, person_id), error=str(exc),
-                ), 400
+                return _person_page(conn, person, error=str(exc),
+                                    state=state, typed=typed), 400
         finally:
             conn.close()
         return redirect(url_for("person_detail", person_id=person_id))
@@ -135,6 +140,29 @@ def register(app) -> None:
         finally:
             conn.close()
         return redirect(url_for("person_detail", person_id=person_id))
+
+
+def _person_page(conn, person: models.Person, *, error: str | None = None,
+                 state: str | None = None, typed: str | None = None):
+    """One place that renders a person, so a refusal looks like the page did.
+
+    A form that comes back empty after complaining has thrown away the work it
+    is complaining about, which is a good way to make someone give up on
+    recording pronouns at all. So what was submitted is what is shown, and only
+    what was never submitted falls back to what is stored.
+    """
+    return render_template(
+        "person.html", caller=g.caller, person=person,
+        note_count=_note_count(conn, person.id), error=error,
+        state=state or _state_of(person),
+        typed=typed if typed is not None else (person.pronouns or ""),
+    )
+
+
+def _state_of(person: models.Person) -> str:
+    if person.pronouns_known:
+        return STATED
+    return WITHHELD if person.pronouns_withheld else NOT_ASKED
 
 
 def _split_aliases(raw: str | None) -> list[str]:

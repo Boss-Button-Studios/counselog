@@ -251,3 +251,8 @@ label.choice {
 label.choice input[type="radio"] { width: 1.15rem; height: 1.15rem; }
 
 input.inline-field { width: auto; flex: 1 1 8rem; min-width: 7rem; padding: 0.5rem; }
+
+/* A label for a field that belongs to the choice above it. */
+label.sub { margin-top: 0.2rem; margin-left: 1.65rem; }
+label.sub + input { width: calc(100% - 1.65rem); margin-left: 1.65rem; }
+label.sub + input + .aside { margin-left: 1.65rem; }

@@ -571,6 +571,18 @@ but preferred not to say (`''`). Choosing "they use" and typing nothing is
 refused rather than quietly filed as never-asked, which would lose an answer
 that was actually given.
 
+**The pronoun example was ghost text, and that was the wrong place for it.**
+Raised in playtesting. A placeholder reading "she/her" is low-contrast, vanishes
+the moment you type, and — in this field above all — reads as a value already
+set, presenting a guess at someone's pronouns as though it were recorded. Moved
+below the field as a real example. Two more faults surfaced while fixing it: the
+radio and the text box shared one `<label>`, so the box had no accessible name
+of its own; and typing pronouns while "Not asked yet" stayed selected silently
+discarded them. The contradiction is now refused in both directions, with what
+was typed still in the form, and a few lines of script tick "They told me" when
+you type — an improvement on top of the server check, never the thing holding it
+together.
+
 "Left the team" stays a status flag and the page says what it does not do:
 `tag` sends people with `include_inactive=True` and `notes_for_bin` ignores
 `active`, so a former colleague still resolves in new notes and their old notes
