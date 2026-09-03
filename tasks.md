@@ -716,6 +716,20 @@ directions. Schema version 5. No protocol change: the desktop already
 distinguishes an exact match from a guess by sending a NULL confidence, so
 provenance can be settled on the laptop.
 
+**Reports are the third reason, and the one that matters most.** Decided while
+playtesting: the value of this tool is the parsing, aggregating and reporting,
+and those run on *checked* work. The record cannot currently support that
+sentence. `confirm_tag` writes a confidence of 1.0, which is indistinguishable
+from a model that happened to answer 1.0 — so a digest has no way to say how
+much of what it is built on a person actually looked at. Provenance is what lets
+a report state what it stands on, which is the difference between a document
+someone can rely on in a difficult conversation and one they cannot.
+
+Design note for part 4, following phase 4's hardest lesson: a report should
+*include* unchecked notes and mark them, never quietly leave them out. A note
+that vanishes silently is the failure that was already found once, and in a
+report it would be worse — the reader cannot notice an absence.
+
 ### Part 4 — reports + dashboard ⬜
 
 `desktop/reporter.py`, as pages rather than CLI commands.
@@ -723,6 +737,9 @@ provenance can be settled on the laptop.
 - Per-person digest: chronological, deterministic cleanup only (whitespace and
   markdown). §9 says no synthesis; Law 7 wants predictable output. LLM polish
   sits behind an explicit `--polish`.
+- Says what it is built on: how many notes, how many carrying a tag a person
+  checked, and how many still resting on the model's own judgment. Unchecked
+  notes appear, marked — never omitted.
 - Backdated notes shown at `backdated_at` with a visible marker.
 - Dashboard: note count and days-since-last per person. Pure SQL, no LLM.
 
