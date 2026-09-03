@@ -24,6 +24,11 @@ TRUST_SELF = "self_authored"
 TRUST_THIRD_PARTY = "third_party"
 
 
+# Distinguishes "leave this as it is" from "set this to None", where None is a
+# value with its own meaning. A plain default cannot express both.
+UNCHANGED = object()
+
+
 class ModelError(Exception):
     """A domain rule was violated."""
 
@@ -40,6 +45,18 @@ class Person:
     aliases: tuple[str, ...]
     active: bool
     created_at: str
+    # Free text, written the way people write it. None means nobody has been
+    # asked; '' means they were asked and preferred not to say. Keeping those
+    # apart is the whole reason this is not a plain string — see the schema.
+    pronouns: str | None = None
+
+    @property
+    def pronouns_known(self) -> bool:
+        return bool(self.pronouns)
+
+    @property
+    def pronouns_withheld(self) -> bool:
+        return self.pronouns == ""
 
 
 @dataclass(frozen=True)
@@ -71,7 +88,7 @@ class Note:
 
 
 def add_person(conn: "sqlcipher3.Connection", display_name: str,
-               aliases: Sequence[str] = ()) -> Person:
+               aliases: Sequence[str] = (), pronouns: str | None = None) -> Person:
     """Add a person and their bin together.
 
     A person without a bin cannot be tagged, so the two are created in one
@@ -85,9 +102,9 @@ def add_person(conn: "sqlcipher3.Connection", display_name: str,
     with conn:
         try:
             cursor = conn.execute(
-                "INSERT INTO people (display_name, aliases, active, created_at) "
-                "VALUES (?, ?, 1, ?)",
-                (display_name, json.dumps(cleaned), utc_now()),
+                "INSERT INTO people (display_name, aliases, pronouns, active, created_at) "
+                "VALUES (?, ?, ?, 1, ?)",
+                (display_name, json.dumps(cleaned), pronouns, utc_now()),
             )
         except sqlcipher3.IntegrityError as exc:
             raise ModelError(f"{display_name} is already on the list.") from exc
@@ -108,6 +125,39 @@ def _clean_aliases(aliases: Iterable[str], display_name: str) -> list[str]:
         if text and text.casefold() not in seen:
             seen[text.casefold()] = text
     return list(seen.values())
+
+
+def update_person(conn: "sqlcipher3.Connection", person_id: int, *,
+                  display_name: str | None = None,
+                  aliases: Sequence[str] | None = None,
+                  pronouns: str | None | object = UNCHANGED) -> Person:
+    """Correct a person's record.
+
+    Aliases could only be set when someone was created, which quietly cost
+    accuracy: they are what resolves a name exactly, so a missing or misspelled
+    one sends a note to the model to guess about, or to no bin at all.
+
+    `pronouns` needs a sentinel rather than a default of None, because None is
+    itself a meaningful value here — "nobody has been asked" — and is a
+    different thing from "do not change what is recorded".
+    """
+    person = get_person(conn, person_id)
+    name = (display_name or person.display_name).strip()
+    if not name:
+        raise ModelError("A person needs a name.")
+    cleaned = _clean_aliases(person.aliases if aliases is None else aliases, name)
+    settled = person.pronouns if pronouns is UNCHANGED else pronouns
+
+    with conn:
+        try:
+            conn.execute(
+                "UPDATE people SET display_name = ?, aliases = ?, pronouns = ? "
+                "WHERE id = ?",
+                (name, json.dumps(cleaned), settled, person_id),
+            )
+        except sqlcipher3.IntegrityError as exc:
+            raise ModelError(f"{name} is already on the list.") from exc
+    return get_person(conn, person_id)
 
 
 def get_person(conn: "sqlcipher3.Connection", person_id: int) -> Person:
@@ -143,6 +193,7 @@ def _person_from_row(row: "sqlcipher3.Row") -> Person:
         aliases=tuple(json.loads(row["aliases"])),
         active=bool(row["active"]),
         created_at=row["created_at"],
+        pronouns=row["pronouns"],
     )
 
 

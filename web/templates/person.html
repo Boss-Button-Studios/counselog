@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}{{ person.display_name }} · Counselog{% endblock %}
+{% block content %}
+
+  <h1>{{ person.display_name }}</h1>
+
+  <p class="aside">
+    On the list since {{ person.created_at | friendly_time }} ·
+    {% if note_count %}
+      <a href="{{ url_for('note_list') }}">{{ note_count }}
+        note{{ "" if note_count == 1 else "s" }}</a> sorted to them
+    {% else %}
+      no notes sorted to them yet
+    {% endif %}
+    {% if not person.active %} · has left the team{% endif %}
+  </p>
+
+  {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('save_person', person_id=person.id) }}">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+
+    <label for="name">Name</label>
+    <input id="name" name="name" type="text" required maxlength="120"
+           autocomplete="off" spellcheck="false" value="{{ person.display_name }}">
+
+    <label for="aliases">Every name you use for them</label>
+    <input id="aliases" name="aliases" type="text" autocomplete="off"
+           spellcheck="false" value="{{ person.aliases | join(', ') }}">
+    <p class="aside">
+      Separate with commas. A note is matched to them by these names exactly,
+      and an exact match is never second-guessed — so a nickname missing here is
+      a note that gets guessed about, or filed nowhere.
+    </p>
+
+    <fieldset>
+      <legend>Pronouns</legend>
+
+      <label class="choice">
+        <input type="radio" name="pronoun_state" value="unasked"
+               {{ "checked" if person.pronouns is none }}>
+        Not asked yet
+      </label>
+
+      <label class="choice">
+        <input type="radio" name="pronoun_state" value="stated"
+               {{ "checked" if person.pronouns_known }}>
+        They use
+        <input name="pronouns" type="text" class="inline-field" maxlength="60"
+               autocomplete="off" spellcheck="false"
+               value="{{ person.pronouns if person.pronouns_known else '' }}"
+               placeholder="she/her">
+      </label>
+
+      <label class="choice">
+        <input type="radio" name="pronoun_state" value="withheld"
+               {{ "checked" if person.pronouns_withheld }}>
+        Asked, and they preferred not to say
+      </label>
+
+      <p class="aside">
+        “Not asked yet” and “preferred not to say” are kept apart on purpose.
+        Recording a choice nobody made would be its own kind of wrong.
+      </p>
+    </fieldset>
+
+    <button type="submit">Save</button>
+  </form>
+
+  <h2>{{ "Still on the team" if person.active else "No longer on the team" }}</h2>
+  <p class="aside">
+    This changes nothing about the record. Their notes stay readable and their
+    names keep sorting new notes — someone who left can still be mentioned. It
+    only decides whether they are offered as current.
+  </p>
+  <form method="post" action="{{ url_for('set_status', person_id=person.id) }}">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <input type="hidden" name="active" value="{{ '0' if person.active else '1' }}">
+    <button type="submit" class="quiet">
+      {{ "Mark as having left" if person.active else "Mark as back on the team" }}
+    </button>
+  </form>
+
+  <p class="aside">
+    <a href="{{ url_for('people_list') }}">Everyone</a> ·
+    <a href="{{ url_for('note_list') }}">Your notes</a>
+  </p>
+
+{% endblock %}

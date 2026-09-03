@@ -225,3 +225,29 @@ ul.rows.notes a:hover, ul.rows.notes a:focus-visible {
 button.destructive { background: var(--error); }
 a.cancel { margin-left: 1rem; }
 a.danger-link { color: var(--error); }
+
+fieldset {
+  margin: 1.2rem 0 0;
+  padding: 0.8rem 1rem 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+legend { padding: 0 0.4rem; color: var(--muted); font-size: 0.95rem; }
+
+/* Each answer is a whole row and a whole target: radio buttons are small, and
+   this gets used with a thumb. */
+label.choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.7rem;
+  color: var(--fg);
+  font-size: 1rem;
+  min-height: 44px;
+}
+
+label.choice input[type="radio"] { width: 1.15rem; height: 1.15rem; }
+
+input.inline-field { width: auto; flex: 1 1 8rem; min-width: 7rem; padding: 0.5rem; }

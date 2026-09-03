@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}People · Counselog{% endblock %}
+{% block content %}
+
+  <h1>People you write about</h1>
+
+  {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <p class="aside">
+    The names here are how a note gets sorted. A note that says “Ada” only finds
+    Ada if “Ada” is one of her names below — otherwise the model is left to
+    guess, or the note lands in no bin at all.
+  </p>
+
+  <form method="post" action="{{ url_for('add_person') }}">
+    <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+    <label for="name">Add someone</label>
+    <input id="name" name="name" type="text" required maxlength="120"
+           autocomplete="off" spellcheck="false" value="{{ name }}"
+           placeholder="Sarah K.">
+    <label for="aliases">Other names you use for them</label>
+    <input id="aliases" name="aliases" type="text" autocomplete="off"
+           spellcheck="false" placeholder="Sarah, SK">
+    <p class="aside">Separate with commas. You can change these later.</p>
+    <button type="submit">Add</button>
+  </form>
+
+  <h2>On the team</h2>
+  {% if here %}
+    <ul class="rows">
+      {% for person in here %}
+        <li>
+          <div>
+            <a href="{{ url_for('person_detail', person_id=person.id) }}">
+              <strong>{{ person.display_name }}</strong></a>
+            <span class="aside">
+              {% if person.aliases | length > 1 %}
+                also {{ person.aliases | reject('equalto', person.display_name) | join(', ') }}
+              {% else %}
+                no other names — a note using a nickname will not find them
+              {% endif %}
+              {% if person.pronouns_known %} · {{ person.pronouns }}{% endif %}
+            </span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="aside">
+      Nobody yet, so only “self” and “team” can be matched.
+    </p>
+  {% endif %}
+
+  {% if gone %}
+    <h2>Left the team</h2>
+    <ul class="rows">
+      {% for person in gone %}
+        <li>
+          <div>
+            <a href="{{ url_for('person_detail', person_id=person.id) }}">
+              <strong>{{ person.display_name }}</strong></a>
+            <span class="aside">their notes stay, and their names still sort</span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">Your notes</a> ·
+    <a href="{{ url_for('home') }}">Write a note</a>
+  </p>
+
+{% endblock %}

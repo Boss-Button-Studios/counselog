@@ -551,19 +551,39 @@ without reading, and this is the one irreversible thing the interface can do.
 **Cloud spellcheck was quietly on.** The capture textarea set no `spellcheck`
 attribute, so it inherited the browser default — and Chrome's "enhanced spell
 check" and Edge's Microsoft Editor send what you type to their servers. The
-README promises notes never leave your two machines; that promise was false for
-anyone with that setting on, and nothing disclosed it (Law 2). Now
+README promises the notes are never unencrypted off your chosen devices; that
+was false for anyone with that setting on, and nothing disclosed it (Law 2). Now
 `spellcheck="false"` explicitly, with the reason in the template so nobody
 "tidies it up" later.
 
-**Slice 2 — the subject registry ⬜** (no schema change needed)
-List, add, and *edit*: aliases can currently only be set when a person is
-created, with no way to add one later or fix a spelling, which quietly costs
-tagging accuracy since aliases are what resolve people exactly. Pronouns, free
-text, three states as the schema insists: never asked (NULL), stated, and
-explicitly not stated (`''`). "Left the team" stays a status flag — `tag` sends
-people with `include_inactive=True` and `notes_for_bin` ignores `active`, so a
-former colleague still resolves in new notes and their old notes stay readable.
+**Slice 2 — the subject registry ✅** (no schema change needed)
+`models.update_person`, `web/views/people.py`, `people.html`, `person.html`.
+Aliases could only be set when a person was created, with no way to add one
+later or fix a spelling — which quietly cost accuracy, since aliases are what
+resolve a name *exactly* and an exact match is the one answer the model is never
+asked to second-guess. Now editable, along with renaming.
+
+`update_person` takes a sentinel for pronouns rather than defaulting to None,
+because None is itself a value here — "nobody has been asked" — and is a
+different thing from "leave what is recorded alone". The interface keeps all
+three states apart: not asked yet (NULL), they told you (the text), and asked
+but preferred not to say (`''`). Choosing "they use" and typing nothing is
+refused rather than quietly filed as never-asked, which would lose an answer
+that was actually given.
+
+"Left the team" stays a status flag and the page says what it does not do:
+`tag` sends people with `include_inactive=True` and `notes_for_bin` ignores
+`active`, so a former colleague still resolves in new notes and their old notes
+stay readable. Nothing about the record changes.
+
+Still CLI-only asymmetry, deliberately left: `counselog people add` has no
+`--pronouns` and there is no `people edit`. The browser is the interface people
+will actually use for this, and a second path to the same edits is a second
+thing to keep correct. Worth adding if the CLI ever becomes the primary way in.
+
+Pronouns are not sent to the mirror — `PersonPayload` carries name, aliases,
+active and created_at only. The desktop does not need them to tag, and less on
+the mirror is better. Revisit when reports start writing sentences about people.
 
 **Slice 3 — editing a note, as revisions ⬜** (schema version 4)
 Decided rather than assumed, because editing text in place would re-hash the
