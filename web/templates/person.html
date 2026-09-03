@@ -35,49 +35,18 @@
       a note that gets guessed about, or filed nowhere.
     </p>
 
-    <fieldset>
-      <legend>Pronouns</legend>
-
-      <label class="choice">
-        <input type="radio" name="pronoun_state" value="unasked"
-               {{ "checked" if state == "unasked" }}>
-        Not asked yet
-      </label>
-
-      <label class="choice">
-        <input type="radio" name="pronoun_state" value="stated"
-               {{ "checked" if state == "stated" }}>
-        They told me
-      </label>
-
-      {# The text field gets its own label rather than sharing the radio's.
-         One label cannot name two controls: a screen reader would announce
-         "They told me" for the radio and leave this box unnamed. #}
-      <label for="pronouns" class="sub">Pronouns they use</label>
-      <input id="pronouns" name="pronouns" type="text" maxlength="60"
-             autocomplete="off" spellcheck="false"
-             aria-describedby="pronoun-examples"
-             value="{{ typed }}">
-      {# Examples below, never as ghost text in the box. Placeholder text is
-         low-contrast, vanishes the moment you type, and — here especially —
-         reads as a value that is already set. A pronoun field that appears
-         pre-filled with someone's pronouns is exactly the wrong impression to
-         give about a person. #}
-      <p class="aside" id="pronoun-examples">
-        For example: she/her, he/him, they/them — or however they write it.
-      </p>
-
-      <label class="choice">
-        <input type="radio" name="pronoun_state" value="withheld"
-               {{ "checked" if state == "withheld" }}>
-        Asked, and they preferred not to say
-      </label>
-
-      <p class="aside">
-        “Not asked yet” and “preferred not to say” are kept apart on purpose.
-        Recording a choice nobody made would be its own kind of wrong.
-      </p>
-    </fieldset>
+    <label for="pronouns">Pronouns</label>
+    <input id="pronouns" name="pronouns" type="text" maxlength="60"
+           autocomplete="off" spellcheck="false"
+           aria-describedby="pronoun-help" value="{{ typed }}">
+    {# One field, and empty is a real answer: nobody has said. The examples sit
+       here rather than as ghost text in the box — placeholder text is
+       low-contrast, disappears as you type, and in this field would read as a
+       guess at someone's pronouns already recorded. #}
+    <p class="aside" id="pronoun-help">
+      However they write it: she/her, he/him, they/them. Leave it empty if you
+      do not know — an empty box records that nobody has said, not a guess.
+    </p>
 
     <button type="submit">Save</button>
   </form>

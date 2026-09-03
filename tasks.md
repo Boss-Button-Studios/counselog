@@ -571,7 +571,21 @@ but preferred not to say (`''`). Choosing "they use" and typing nothing is
 refused rather than quietly filed as never-asked, which would lose an answer
 that was actually given.
 
-**The pronoun example was ghost text, and that was the wrong place for it.**
+**The three-way pronoun control became one field.** Playtesting kept catching
+faults in it — ghost text that read as a value already set, a `<label>` shared
+between the radio and the box so the box had no accessible name, and typing
+pronouns while "Not asked yet" stayed selected discarding them silently. Each
+was fixed, and then the control itself went: filled means known, empty means
+nobody has said. All three faults become impossible rather than fixed, because
+the mechanism causing them is gone.
+
+What that gives up is "asked, and preferred not to say" — the one thing the
+third state bought was a reminder not to ask again, in exchange for asking the
+user to file someone's refusal. The column still keeps `''` distinct from NULL
+and `Person.pronouns_withheld` still reads it, because losing that would need a
+migration to get back; nothing in the browser writes it.
+
+The fixes that led there, kept for the reasoning:
 Raised in playtesting. A placeholder reading "she/her" is low-contrast, vanishes
 the moment you type, and — in this field above all — reads as a value already
 set, presenting a guess at someone's pronouns as though it were recorded. Moved

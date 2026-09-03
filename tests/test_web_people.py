@@ -5,8 +5,10 @@ exact match is the one answer the model is never asked to second-guess — so a
 missing alias is a note that gets guessed about or filed nowhere. Until this
 slice they could only be set when a person was created.
 
-Pronouns get their own attention because the column keeps three states, not two,
-and collapsing them would mean recording a considered choice nobody made.
+Pronouns are one free-text field, because a three-way control asked the user to
+file someone's refusal in exchange for very little. Empty means nobody has said
+— which is not the same as a claim that anybody was asked, and the column still
+keeps that distinction even though nothing here writes it.
 """
 
 import re
@@ -172,69 +174,50 @@ def test_a_person_who_does_not_exist_says_so(client):
     assert get(client, "/people/999").status_code == 404
 
 
-# ── pronouns, three states ───────────────────────────────────────────────────
+# ── pronouns: known, or not ──────────────────────────────────────────────────
 
 
-def test_a_new_person_has_not_been_asked(client, dek, ada):
-    """Not 'not stated'. Nobody has been asked yet, and that is different."""
+def test_a_new_person_has_no_pronouns_recorded(client, dek, ada):
+    """Not a guess, and not a claim that anybody was asked."""
     assert person_in(dek, ada.id).pronouns is None
 
 
-def test_pronouns_can_be_recorded_as_given(client, dek, ada):
+def test_pronouns_are_recorded_as_written(client, dek, ada):
+    """Free text: however they write it, not a set someone else chose."""
     post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-         pronoun_state="stated", pronouns="she/her")
+         pronouns="she/they")
     person = person_in(dek, ada.id)
-    assert person.pronouns == "she/her"
-    assert person.pronouns_known and not person.pronouns_withheld
+    assert person.pronouns == "she/they"
+    assert person.pronouns_known
 
 
-def test_preferring_not_to_say_is_recorded_as_a_real_answer(client, dek, ada):
-    """'' is a considered choice; None is the absence of one."""
+def test_an_empty_box_means_nobody_has_said(client, dek, ada):
     post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-         pronoun_state="withheld")
-    person = person_in(dek, ada.id)
-    assert person.pronouns == ""
-    assert person.pronouns_withheld and not person.pronouns_known
+         pronouns="she/her")
+    post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada", pronouns="")
+    assert person_in(dek, ada.id).pronouns is None
 
 
-def test_the_two_kinds_of_no_answer_are_not_collapsed(client, dek, ada):
+def test_whitespace_is_not_a_pronoun(client, dek, ada):
+    post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada", pronouns="   ")
+    assert person_in(dek, ada.id).pronouns is None
+
+
+def test_editing_a_name_does_not_disturb_recorded_pronouns(client, dek, ada):
     post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-         pronoun_state="withheld")
-    withheld = person_in(dek, ada.id).pronouns
-    post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-         pronoun_state="unasked")
-    unasked = person_in(dek, ada.id).pronouns
-    assert withheld == "" and unasked is None
-    assert withheld != unasked
+         pronouns="they/them")
+    post(client, f"/people/{ada.id}", name="Ada Lovelace", aliases="Ada",
+         pronouns="they/them")
+    assert person_in(dek, ada.id).pronouns == "they/them"
 
 
-def test_saying_they_use_something_but_typing_nothing_is_refused(client, dek, ada):
-    """Silently filing it as 'never asked' would lose the answer given."""
-    page = post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-                pronoun_state="stated", pronouns="   ")
-    assert "Type the pronouns they use" in text_of(page)
-    assert person_in(dek, ada.id).pronouns is None, "nothing was recorded"
-
-
-def test_typing_pronouns_without_choosing_them_is_refused(client, dek, ada):
-    """The trap that came with moving the example out of the box.
-
-    Type pronouns, leave "Not asked yet" selected, save — and before this the
-    text was silently discarded. Choosing for the user is not the fix either:
-    filing it as stated would invent an answer, and dropping it throws away one
-    that was given. So it says so.
-    """
-    page = post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-                pronoun_state="unasked", pronouns="they/them")
-    assert "did not choose" in text_of(page)
-    assert person_in(dek, ada.id).pronouns is None, "nothing invented"
-
-
-def test_a_refused_pronoun_answer_keeps_what_was_typed(client, ada):
+def test_a_refused_edit_keeps_the_pronouns_that_were_typed(client, ada):
     """A form that empties itself while complaining teaches people to give up."""
-    page = post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-                pronoun_state="unasked", pronouns="they/them")
-    assert 'value="they/them"' in page.get_data(as_text=True)
+    post(client, "/people", name="Tom R.")
+    page = post(client, f"/people/{ada.id}", name="Tom R.", aliases="Ada",
+                pronouns="she/her")
+    assert "already on the list" in text_of(page)
+    assert 'value="she/her"' in page.get_data(as_text=True)
 
 
 def test_the_pronoun_example_is_not_ghost_text_in_the_field(client, ada):
@@ -245,23 +228,31 @@ def test_the_pronoun_example_is_not_ghost_text_in_the_field(client, ada):
     """
     body = get(client, f"/people/{ada.id}").get_data(as_text=True)
     assert "placeholder" not in body
-    assert "For example: she/her" in text_of(get(client, f"/people/{ada.id}"))
+    assert "she/her, he/him, they/them" in text_of(get(client, f"/people/{ada.id}"))
 
 
-def test_the_pronoun_field_has_a_label_of_its_own(client, ada):
-    """One label cannot name two controls; the box would go unnamed."""
+def test_the_pronoun_field_is_labelled_and_described(client, ada):
     body = get(client, f"/people/{ada.id}").get_data(as_text=True)
-    assert 'for="pronouns"' in body
-    assert 'id="pronouns"' in body
-    assert 'aria-describedby="pronoun-examples"' in body
+    assert 'for="pronouns"' in body and 'id="pronouns"' in body
+    assert 'aria-describedby="pronoun-help"' in body
 
 
-def test_editing_a_name_does_not_disturb_recorded_pronouns(client, dek, ada):
-    post(client, f"/people/{ada.id}", name="Ada L.", aliases="Ada",
-         pronoun_state="stated", pronouns="they/them")
-    post(client, f"/people/{ada.id}", name="Ada Lovelace", aliases="Ada",
-         pronoun_state="stated", pronouns="they/them")
-    assert person_in(dek, ada.id).pronouns == "they/them"
+def test_the_column_still_tells_declined_apart_from_never_asked(dek, home):
+    """The interface offers two answers; the record can still hold three.
+
+    Nothing in the browser writes '' — a three-way control asks the user to file
+    someone's refusal and buys only a reminder not to ask again. The column keeps
+    the distinction because losing it would need a migration to get back.
+    """
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        declined = models.add_person(conn, "Tom R.", pronouns="")
+        never = models.add_person(conn, "Sam P.")
+        assert declined.pronouns_withheld and not declined.pronouns_known
+        assert never.pronouns is None and not never.pronouns_withheld
+        assert declined.pronouns != never.pronouns
+    finally:
+        conn.close()
 
 
 def test_update_person_leaves_pronouns_alone_unless_asked(dek, home):

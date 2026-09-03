@@ -7,10 +7,11 @@ guessed about or into no bin at all. Until now they could only be set when a
 person was created, with no way to add one later.
 
 Pronouns are recorded because writing about someone for months and getting them
-wrong is a real way to do harm with a tool like this. Three states, not two:
-nobody has been asked, they told you, or they were asked and preferred not to
-say. Recording "not stated" for someone nobody ever asked about would be
-inventing a considered choice that was never made.
+wrong is a real way to do harm with a tool like this. One field, and an empty
+one is a real answer: nobody has said. It deliberately does not claim that
+anybody was *asked* — the column can still hold "asked, and preferred not to
+say" (`''`), but nothing here writes it, because a three-way control asks the
+user to file someone's refusal and buys only a reminder not to ask again.
 """
 
 from __future__ import annotations
@@ -19,12 +20,6 @@ from flask import g, redirect, render_template, request, url_for
 
 from core import models
 from web.access import open_database, requires_unlock
-
-# What the pronoun radio group can say, and what each means in storage.
-NOT_ASKED = "unasked"
-STATED = "stated"
-WITHHELD = "withheld"
-
 
 def register(app) -> None:
 
@@ -89,34 +84,16 @@ def register(app) -> None:
             if person is None:
                 return _no_such_person()
 
-            state = request.form.get("pronoun_state") or NOT_ASKED
-            typed = (request.form.get("pronouns") or "").strip()
-
-            # The two ways the answer and the box can disagree. Neither is
-            # allowed to resolve itself quietly: picking one for the user would
-            # mean either inventing an answer nobody gave or throwing away one
-            # they did (Law 6).
-            complaint = None
-            if state == STATED and not typed:
-                complaint = ("Type the pronouns they use, or choose one of the "
-                             "other two answers.")
-            elif state != STATED and typed:
-                complaint = ("You typed pronouns but did not choose “They told "
-                             "me”. Choose it to record them, or clear the box.")
-            if complaint:
-                return _person_page(conn, person, error=complaint,
-                                    state=state, typed=typed), 400
-
             try:
                 models.update_person(
                     conn, person_id,
                     display_name=request.form.get("name"),
                     aliases=_split_aliases(request.form.get("aliases")),
-                    pronouns=_pronouns_from(state, typed),
+                    pronouns=_pronouns(request.form.get("pronouns")),
                 )
             except models.ModelError as exc:
                 return _person_page(conn, person, error=str(exc),
-                                    state=state, typed=typed), 400
+                                    typed=request.form.get("pronouns")), 400
         finally:
             conn.close()
         return redirect(url_for("person_detail", person_id=person_id))
@@ -143,26 +120,18 @@ def register(app) -> None:
 
 
 def _person_page(conn, person: models.Person, *, error: str | None = None,
-                 state: str | None = None, typed: str | None = None):
+                 typed: str | None = None):
     """One place that renders a person, so a refusal looks like the page did.
 
     A form that comes back empty after complaining has thrown away the work it
-    is complaining about, which is a good way to make someone give up on
-    recording pronouns at all. So what was submitted is what is shown, and only
-    what was never submitted falls back to what is stored.
+    is complaining about. So what was submitted is what is shown, and only what
+    was never submitted falls back to what is stored.
     """
     return render_template(
         "person.html", caller=g.caller, person=person,
         note_count=_note_count(conn, person.id), error=error,
-        state=state or _state_of(person),
         typed=typed if typed is not None else (person.pronouns or ""),
     )
-
-
-def _state_of(person: models.Person) -> str:
-    if person.pronouns_known:
-        return STATED
-    return WITHHELD if person.pronouns_withheld else NOT_ASKED
 
 
 def _split_aliases(raw: str | None) -> list[str]:
@@ -170,13 +139,13 @@ def _split_aliases(raw: str | None) -> list[str]:
     return [part.strip() for part in (raw or "").split(",") if part.strip()]
 
 
-def _pronouns_from(state: str, typed: str) -> str | None:
-    """The radio group as the three values the column actually holds."""
-    if state == STATED:
-        return typed
-    if state == WITHHELD:
-        return ""       # asked, and they preferred not to say
-    return None         # nobody has been asked
+def _pronouns(raw: str | None) -> str | None:
+    """What was typed, or None for "nobody has said".
+
+    None rather than '': the empty string means someone was asked and declined,
+    which is a claim about a conversation that may never have happened.
+    """
+    return (raw or "").strip() or None
 
 
 def _find(conn, person_id: int) -> models.Person | None:
