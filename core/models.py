@@ -487,10 +487,14 @@ def tags_needing_review(conn: "sqlcipher3.Connection", threshold: float) -> list
 
     Exact alias matches have a NULL confidence and never appear here — there is
     nothing to second-guess about a name that is literally present.
+
+    Replaced notes are skipped. A corrected note is re-sorted, so its old version
+    and its new one would otherwise both queue up, asking twice about the same
+    thing and once about text no longer in the record.
     """
     rows = conn.execute(
         "SELECT n.*, t.bin_id, t.confidence FROM note_tags t JOIN notes n ON n.id = t.note_id "
-        "WHERE t.confidence IS NOT NULL AND t.confidence < ? "
+        f"WHERE t.confidence IS NOT NULL AND t.confidence < ? AND NOT n.{SUPERSEDED} "
         "ORDER BY t.confidence, n.id",
         (threshold,),
     ).fetchall()

@@ -650,6 +650,13 @@ Knock-on effects, none of them optional:
 - A note can be corrected once. Two corrections of the same note would fork the
   thread, leaving no single answer to what it says now.
 
+**A regression the same slice introduced, found by asking what happens next.**
+`tags_needing_review` never learned about `supersedes`, so `counselog review`
+offered the same tag twice — once on the corrected note and once on the version
+it replaced, which is no longer in the record. Filtered. It was the only read of
+a note that had been missed, and it hid because the query selects `FROM
+note_tags`, so a grep for `FROM notes` walked straight past it.
+
 **A migration test was quietly lying.** It rewound the schema but left bodies
 hashed under the current rules, so it asserted something no older database ever
 contained — and would have hidden whether a genuinely old record survives coming
@@ -674,12 +681,40 @@ Raised while playtesting; recorded so they are not rediscovered later.
   permanent revision rather than a silent fix. Must not be the browser's, for
   the reason above. The local model could do it, but that is a slow round trip
   for a typo, so this needs thought rather than an obvious answer.
+- **Reprocessing on much weaker hardware.** Re-sorting every correction is a
+  deliberate trade: local inference is slow (deepseek-r1:14b measured at ~88 s a
+  note) and the machine's time is what it is for. Someone running this on a
+  laptop that struggles would want the choice, which means the policy wants to
+  stay in one obvious place rather than spread across the edit path.
 - **File ingest in the browser.** `counselog import` already exists in the CLI,
   one file to one note, with `--third-party` setting `source_trust` so the
   stronger sanitization of spec §10 can be applied later. The browser has no
   equivalent. Note that spec §7 deliberately scoped sanitization to
   self-authored text; a file arriving from elsewhere is the case that scoping
   was deferring, so this is not purely an interface job.
+
+### Part 3, slice 5 — what a correction does to the sorting ⬜
+
+**Decided: a corrected note is always re-sorted.** The machine's time is what it
+is there for, and slow local inference is the trade being made deliberately
+rather than a cost to design around. Already the behaviour — `revise` leaves the
+correction unprocessed — so nothing was needed for the decision itself. Worth
+keeping in one obvious place: a user on much weaker hardware might answer
+differently, and that is the line they would want to change.
+
+**But that decision makes tag provenance necessary rather than optional.** Every
+correction now re-runs the model, and `set_tags` replaces everything, so today a
+typo fix discards a tag you confirmed and can resurrect one you rejected —
+`reject_tag` deletes the row, so the rejection is recorded nowhere and the model
+is free to suggest it again. Rare enough to ignore when re-tagging was rare;
+weekly once corrections are routine.
+
+Proposed: `note_tags` records who decided — alias, model, or person — and
+whether the decision was to include or exclude. Re-tagging then replaces only
+the alias and model rows and leaves a person's judgment alone, in both
+directions. Schema version 5. No protocol change: the desktop already
+distinguishes an exact match from a guess by sending a NULL confidence, so
+provenance can be settled on the laptop.
 
 ### Part 4 — reports + dashboard ⬜
 

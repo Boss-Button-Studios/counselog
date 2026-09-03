@@ -150,6 +150,20 @@ def test_a_correction_is_queued_for_tagging_again(conn, note):
     assert [n.id for n in models.unprocessed_notes(conn)] == [revised.id]
 
 
+def test_the_review_queue_asks_about_the_current_note_only(conn, note):
+    """A corrected note is re-sorted, so both versions would otherwise queue.
+
+    You would be asked the same question twice, once about text that is no
+    longer in the record — and answering the stale one would change nothing.
+    """
+    models.set_tags(conn, note.id, [("team", 0.4)])
+    revised = revisions.revise(conn, note.id, "Ada pushed back on the timeline.")
+    models.set_tags(conn, revised.id, [("team", 0.4)])
+
+    queued = models.tags_needing_review(conn, 0.7)
+    assert [n.id for n, _, _ in queued] == [revised.id]
+
+
 def test_a_replaced_note_is_not_sent_to_the_model_again(conn, note):
     revisions.revise(conn, note.id, "corrected")
     assert note.id not in [n.id for n in models.unprocessed_notes(conn)]
