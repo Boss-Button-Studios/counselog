@@ -25,7 +25,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
-| Phase 6 — The browser interface | 🟨 Parts 1–2 done (389 tests, 89% cov) | desktop |
+| Phase 6 — The browser interface | 🟨 Parts 1–3 done (506 tests) | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
 | Phase 8 — Harden + docs | ⬜ Not started | both |
 
