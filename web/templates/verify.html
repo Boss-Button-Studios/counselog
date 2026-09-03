@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Check the record · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Check the record</h1>
+
+  {% if result.checked == 0 %}
+    <p>No notes yet — nothing to check.</p>
+
+  {% elif result.ok %}
+    <p class="notice" role="status">
+      All {{ result.checked }} note{{ "" if result.checked == 1 else "s" }}
+      are unaltered since they were written.
+    </p>
+    {% if result.tombstoned %}
+      <p class="aside">
+        {{ result.tombstoned }} note{{ "" if result.tombstoned == 1 else "s" }}
+        had the text cleared. The record around
+        {{ "it" if result.tombstoned == 1 else "them" }} is intact, but
+        {{ "its" if result.tombstoned == 1 else "their" }} text can no longer be
+        checked — that is the unavoidable cost of genuinely removing it.
+      </p>
+    {% endif %}
+
+  {% else %}
+    <div class="notice danger" role="alert">
+      <p><strong>Problems found in {{ problems | length }}
+         place{{ "" if problems | length == 1 else "s" }}.</strong></p>
+      <p>Something has changed the record outside this program. The notes
+         themselves may still be readable; what is no longer true is that they
+         are provably as written.</p>
+    </div>
+    <ul class="rows">
+      {% for problem in problems %}
+        <li>
+          <div>
+            <strong>{{ problem.reason }}</strong>
+            <span class="aside">
+              {{ problem.where }}
+              {% if problem.outside_the_chain %}
+                · this note was never recorded through Counselog
+              {% endif %}
+            </span>
+          </div>
+          <a class="quiet-link" href="{{ url_for('note_detail', note_id=problem.note_id) }}">See it</a>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if result.checked %}
+    <h2>What this does and does not show</h2>
+    <p>
+      It shows the notes have not been changed since they were written. It does
+      <strong>not</strong> show that what they say is true, and it does not show
+      exactly when the events in them happened — only the order in which they
+      were written down.
+    </p>
+
+    {% if head %}
+      <h2>The record's fingerprint</h2>
+      <p class="aside">
+        Covering {{ covered }} entr{{ "y" if covered == 1 else "ies" }}. Worth
+        writing down somewhere other than this machine. Checking a fresh result
+        against a copy you kept catches something this page cannot on its own:
+        a rewrite of the whole chain is internally consistent, and only an older
+        copy of this value contradicts it.
+      </p>
+      <p class="mono fingerprint">{{ head }}</p>
+    {% endif %}
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">Your notes</a> ·
+    <a href="{{ url_for('home') }}">Write a note</a>
+  </p>
+
+{% endblock %}

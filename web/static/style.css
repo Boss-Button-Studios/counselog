@@ -225,3 +225,16 @@ ul.rows.notes a:hover, ul.rows.notes a:focus-visible {
 button.destructive { background: var(--error); }
 a.cancel { margin-left: 1rem; }
 a.danger-link { color: var(--error); }
+
+/* The chain head, meant to be read character by character or copied whole. */
+.fingerprint {
+  overflow-wrap: anywhere;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--fg) 3%, transparent);
+  font-size: 0.9rem;
+  color: var(--fg);
+}
+
+a.quiet-link { font-size: 0.9rem; white-space: nowrap; }

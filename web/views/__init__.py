@@ -8,9 +8,9 @@ blueprint would add a naming layer that buys nothing here (Law 9).
 
 from __future__ import annotations
 
-from web.views import auth, capture, devices, held, notes, people
+from web.views import auth, capture, devices, held, notes, people, verify
 
 
 def register_all(app) -> None:
-    for module in (auth, capture, devices, held, notes, people):
+    for module in (auth, capture, devices, held, notes, people, verify):
         module.register(app)

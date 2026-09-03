@@ -534,7 +534,7 @@ by the previous release, which does not survive the release after next.
 `tests/test_migrations.py` takes a current database apart to imitate versions 1
 and 2, and checks the notes and the chain survive coming forward.
 
-### Part 3 — reading back, and the subject registry 🟨
+### Part 3 — reading back, and the subject registry ✅
 
 Four slices, sequenced to keep the one that needs a schema change last, and to
 give something playtestable after each.
@@ -668,10 +668,25 @@ is preceded by a comment block — the edit leaves a dangling comma. Only the te
 helper drops columns, but both new columns are placed off the end of their
 tables so it stays possible.
 
-**Slice 4 — a verify page ⬜**
-`models.verify` already exists and is CLI-only. The page must repeat what the
-CLI prints: that this shows the notes are unaltered, not that what they say is
-true, nor exactly when the events happened.
+**Slice 4 — checking the record from the browser ✅**
+`web/views/verify.py`, `verify.html`. `models.verify` has existed since phase 2
+and was reachable only from the CLI. The page repeats the limits the CLI states,
+in the same words: it shows the notes have not been changed, not that what they
+say is true, and not when the events happened. A tool that lets a reassuring
+result imply more than it checked is worse than one that checks nothing, because
+it will be believed.
+
+Every break is listed rather than the first, a note that was never recorded
+through Counselog is called out as such, and a cleared note is reported as no
+longer checkable rather than quietly passing.
+
+Also shows the chain head, which was not in the plan. It is the value worth
+keeping somewhere other than this machine: a rewrite of the whole chain is
+internally consistent and verifies clean, so only an older copy of that value
+contradicts it. Phase 7 signs it; writing it down is the poor version of the
+same idea, and costs one line to offer.
+
+Part 3 is complete.
 
 ### Backlog — wanted, not scheduled
 
