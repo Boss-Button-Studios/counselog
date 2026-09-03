@@ -97,15 +97,24 @@ def test_a_bad_address_is_rejected(certs):
 # ── protocol ─────────────────────────────────────────────────────────────────
 
 
-def _payload(note_id=1, seq=1, text="hello", prev=None, tombstoned=None):
+def _payload(note_id=1, seq=1, text="hello", prev=None, tombstoned=None,
+             supersedes=None, canon_version=chain.CANON_VERSION):
+    """One note on the wire.
+
+    `canon_version` is explicit because the body hash depends on it: a payload
+    hashed one way and labelled another is exactly what the mirror is supposed
+    to refuse.
+    """
     prev = prev or chain.GENESIS_HASH
     body = chain.body_hash(note_id=note_id, captured_at="2026-08-30T00:00:00+00:00",
                            backdated_at=None, source_type="text_prompt",
-                           source_trust="self_authored", raw_text=text)
+                           source_trust="self_authored", raw_text=text,
+                           supersedes=supersedes, version=canon_version)
     return protocol.NotePayload(
         note_id=note_id, captured_at="2026-08-30T00:00:00+00:00", backdated_at=None,
         source_type="text_prompt", source_trust="self_authored", raw_text=text,
-        tombstoned_at=tombstoned, seq=seq, body_hash=body, prev_hash=prev,
+        tombstoned_at=tombstoned, supersedes=supersedes, canon_version=canon_version,
+        seq=seq, body_hash=body, prev_hash=prev,
         entry_hash=chain.link_hash(prev, body), hashed_at="2026-08-30T00:00:00+00:00",
     )
 
@@ -113,6 +122,24 @@ def _payload(note_id=1, seq=1, text="hello", prev=None, tombstoned=None):
 def test_a_valid_payload_round_trips():
     original = _payload()
     assert protocol.NotePayload.from_json(original.to_json()) == original
+
+
+def test_a_payload_from_before_revisions_is_still_understood():
+    """An older laptop sends neither field. Its notes were hashed without them."""
+    old = _payload(canon_version=1).to_json()
+    del old["supersedes"], old["canon_version"]
+
+    parsed = protocol.NotePayload.from_json(old)
+    assert parsed.canon_version == 1 and parsed.supersedes is None
+    parsed.verify_self_consistency()
+
+
+def test_a_payload_hashed_one_way_and_labelled_another_is_refused():
+    """The version is part of what the body hash means, not a free-text label."""
+    mislabelled = protocol.NotePayload.from_json(
+        {**_payload().to_json(), "canon_version": 1})
+    with pytest.raises(protocol.ProtocolError, match="does not match the chain entry"):
+        mislabelled.verify_self_consistency()
 
 
 def test_a_note_that_does_not_match_its_chain_entry_is_refused():
@@ -133,7 +160,8 @@ def test_a_tombstoned_note_skips_the_body_check_but_not_the_link():
     body = "a" * 64
     entry = protocol.NotePayload(
         note_id=1, captured_at="t", backdated_at=None, source_type="text_prompt",
-        source_trust="self_authored", raw_text="", tombstoned_at="t", seq=1,
+        source_trust="self_authored", raw_text="", tombstoned_at="t",
+        supersedes=None, canon_version=chain.CANON_VERSION, seq=1,
         body_hash=body, prev_hash=chain.GENESIS_HASH,
         entry_hash=chain.link_hash(chain.GENESIS_HASH, body), hashed_at="t",
     )

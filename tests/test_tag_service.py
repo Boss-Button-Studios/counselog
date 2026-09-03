@@ -78,11 +78,13 @@ def _note(seq=1, note_id=1, text="Sarah pushed back on the timeline.", prev=None
     prev = prev or chain.GENESIS_HASH
     body = chain.body_hash(note_id=note_id, captured_at="2026-08-30T00:00:00+00:00",
                            backdated_at=None, source_type="text_prompt",
-                           source_trust="self_authored", raw_text=text)
+                           source_trust="self_authored", raw_text=text,
+                           supersedes=None, version=chain.CANON_VERSION)
     return {
         "note_id": note_id, "captured_at": "2026-08-30T00:00:00+00:00",
         "backdated_at": None, "source_type": "text_prompt",
         "source_trust": "self_authored", "raw_text": text, "tombstoned_at": None,
+        "supersedes": None, "canon_version": chain.CANON_VERSION,
         "seq": seq, "body_hash": body, "prev_hash": prev,
         "entry_hash": chain.link_hash(prev, body), "hashed_at": "2026-08-30T00:00:00+00:00",
     }

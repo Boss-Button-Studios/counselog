@@ -13,7 +13,7 @@ Each test says which version it is imitating and what that version lacked.
 import pytest
 import sqlcipher3
 
-from core import db, devices, intake, models
+from core import chain, db, devices, intake, models
 
 KEY = bytes(range(32))
 
@@ -35,6 +35,16 @@ def _rewind_to(path, version: int) -> None:
     """Turn a current database into what `version` would have left behind."""
     conn = _raw(path)
     try:
+        if version < 4:
+            # The index goes first — SQLite will not drop a column an index
+            # still refers to. Neither column is last in its table, which also
+            # matters: dropping a trailing column whose definition is preceded
+            # by a comment block leaves a dangling comma and SQLite refuses the
+            # whole statement.
+            conn.execute("DROP INDEX IF EXISTS notes_one_revision")
+            conn.execute("ALTER TABLE notes DROP COLUMN supersedes")
+            conn.execute("ALTER TABLE note_chain DROP COLUMN canon_version")
+            _rehash_under_version_one(conn)
         if version < 3:
             conn.execute("DROP TABLE spool_quarantine")
         if version < 2:
@@ -46,6 +56,56 @@ def _rewind_to(path, version: int) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def _rehash_under_version_one(conn) -> None:
+    """Rewrite the chain the way a database that predates revisions held it.
+
+    Rewinding the schema is not enough on its own. A note written by this build
+    was hashed with `supersedes` in the bytes; a real older database has bodies
+    hashed without it. Leaving the newer hashes in place would make the test
+    assert something no older database ever contained — and would have hidden
+    whether a genuinely old record still verifies after coming forward, which is
+    the one thing that matters for a database already holding notes.
+
+    The append-only triggers have to come off to do this, which is the point:
+    nothing outside a test can rewrite these rows.
+    """
+    conn.execute("DROP TRIGGER chain_is_append_only_update")
+    conn.execute("DROP TRIGGER chain_is_append_only_delete")
+
+    previous = chain.GENESIS_HASH
+    rows = conn.execute(
+        "SELECT c.seq, n.* FROM note_chain c JOIN notes n ON n.id = c.note_id "
+        "ORDER BY c.seq").fetchall()
+    for row in rows:
+        body = chain.body_hash(
+            note_id=int(row["id"]),
+            captured_at=row["captured_at"],
+            backdated_at=row["backdated_at"],
+            source_type=row["source_type"],
+            source_trust=row["source_trust"],
+            raw_text=row["raw_text"],
+            version=1,
+        )
+        entry = chain.link_hash(previous, body)
+        conn.execute(
+            "UPDATE note_chain SET body_hash = ?, prev_hash = ?, entry_hash = ? "
+            "WHERE seq = ?", (body, previous, entry, int(row["seq"])))
+        previous = entry
+
+    conn.executescript("""
+        CREATE TRIGGER chain_is_append_only_update
+        BEFORE UPDATE ON note_chain
+        BEGIN
+            SELECT RAISE(ABORT, 'The note chain cannot be edited.');
+        END;
+        CREATE TRIGGER chain_is_append_only_delete
+        BEFORE DELETE ON note_chain
+        BEGIN
+            SELECT RAISE(ABORT, 'The note chain cannot be edited.');
+        END;
+    """)
 
 
 def _tables(conn) -> set[str]:
@@ -75,6 +135,7 @@ def with_a_note(path):
 @pytest.mark.parametrize("version, missing", [
     (1, "pronouns, devices and the spool keypair"),
     (2, "the quarantine"),
+    (3, "the revision columns"),
 ])
 def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version,
                                                             missing):
@@ -87,9 +148,14 @@ def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version
         conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("version", [1, 2, 3])
 def test_the_notes_survive_the_migration(with_a_note, version):
-    """The whole point. A migration that loses a note is worse than no tool."""
+    """The whole point. A migration that loses a note is worse than no tool.
+
+    Including that a note hashed under the *old* serialisation still verifies
+    after coming forward — which is what every database already holding notes is
+    about to do.
+    """
     _rewind_to(with_a_note, version)
     conn = db.connect(with_a_note, KEY)
     try:

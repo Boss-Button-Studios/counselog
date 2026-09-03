@@ -243,10 +243,115 @@ def test_clearing_needs_the_form_token(client, written, dek):
         conn.close()
 
 
+# ── correcting one ───────────────────────────────────────────────────────────
+
+
+def test_the_note_page_offers_a_correction(client, written):
+    first, _, _ = written
+    sign_in(client)
+    assert "Correct this note" in text_of(get(client, f"/notes/{first.id}"))
+
+
+def test_the_edit_form_says_what_an_edit_does_not_do(client, written):
+    """"Edit" normally means the old version is gone. Here it is not, and
+    someone has to be told that before they rely on it."""
+    first, _, _ = written
+    sign_in(client)
+    page = text_of(get(client, f"/notes/{first.id}/edit"))
+    assert "does not unsay anything" in page
+    assert "clear the note" in page.lower()
+
+
+def test_saving_a_correction_shows_the_new_text(client, written, dek):
+    first, _, _ = written
+    sign_in(client)
+    response = client.post(f"/notes/{first.id}/edit",
+                           data={"text": "Ada pushed back, and was right to.",
+                                 "_csrf": token_on(client, f"/notes/{first.id}/edit")},
+                           environ_overrides=TAILSCALE, follow_redirects=True)
+    assert "Ada pushed back, and was right to." in text_of(response)
+
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        assert models.verify(conn).ok, "the record still checks out"
+        assert models.get_note(conn, first.id).raw_text.endswith("timeline.")
+    finally:
+        conn.close()
+
+
+def test_the_list_shows_the_correction_and_marks_it_edited(client, written):
+    first, _, _ = written
+    sign_in(client)
+    client.post(f"/notes/{first.id}/edit",
+                data={"text": "Ada pushed back, and was right to.",
+                      "_csrf": token_on(client, f"/notes/{first.id}/edit")},
+                environ_overrides=TAILSCALE)
+    page = text_of(get(client, "/notes"))
+    assert "Ada pushed back, and was right to." in page
+    assert "edited" in page
+    assert page.count("Ada pushed back") == 1, "one row per note, not one per version"
+
+
+def test_an_earlier_version_is_still_reachable_and_says_it_is_earlier(client, written):
+    first, _, _ = written
+    sign_in(client)
+    client.post(f"/notes/{first.id}/edit",
+                data={"text": "Ada pushed back, and was right to.",
+                      "_csrf": token_on(client, f"/notes/{first.id}/edit")},
+                environ_overrides=TAILSCALE)
+    page = text_of(get(client, f"/notes/{first.id}"))
+    assert "This is an earlier version" in page
+    assert "Ada pushed back on the timeline." in page, "its own text is still there"
+
+
+def test_an_earlier_version_cannot_be_corrected_again(client, written):
+    """Two corrections of one note leave no single answer to what it says now."""
+    first, _, _ = written
+    sign_in(client)
+    client.post(f"/notes/{first.id}/edit",
+                data={"text": "first correction",
+                      "_csrf": token_on(client, f"/notes/{first.id}/edit")},
+                environ_overrides=TAILSCALE)
+    assert "Correct this note" not in text_of(get(client, f"/notes/{first.id}"))
+
+
+def test_a_refused_correction_keeps_the_draft(client, written):
+    first, _, _ = written
+    sign_in(client)
+    response = client.post(f"/notes/{first.id}/edit",
+                           data={"text": "Ada pushed back on the timeline.",
+                                 "_csrf": token_on(client, f"/notes/{first.id}/edit")},
+                           environ_overrides=TAILSCALE)
+    assert response.status_code == 400
+    assert "same text" in text_of(response)
+
+
+def test_a_cleared_note_offers_no_correction(client, written):
+    first, _, _ = written
+    sign_in(client)
+    client.post(f"/notes/{first.id}/clear",
+                data={"_csrf": token_on(client, f"/notes/{first.id}/clear")},
+                environ_overrides=TAILSCALE)
+    assert get(client, f"/notes/{first.id}/edit").status_code == 302
+
+
+def test_correcting_needs_the_form_token(client, written, dek):
+    first, _, _ = written
+    sign_in(client)
+    assert client.post(f"/notes/{first.id}/edit", data={"text": "hijacked"},
+                       environ_overrides=TAILSCALE).status_code == 400
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        assert len(models.list_notes(conn, include_replaced=True)) == 3
+    finally:
+        conn.close()
+
+
 # ── who may read ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("path", ["/notes", "/notes/1", "/notes/1/clear"])
+@pytest.mark.parametrize("path", ["/notes", "/notes/1", "/notes/1/clear",
+                                  "/notes/1/edit"])
 def test_reading_notes_needs_a_session(client, written, path):
     """Reaching the page proves nothing about being allowed to read anything."""
     response = get(client, path)

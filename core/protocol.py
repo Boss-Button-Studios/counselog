@@ -48,14 +48,28 @@ def _optional_string(data: Mapping[str, Any], key: str, *, max_length: int = 512
     return _string(data, key, max_length=max_length)
 
 
-def _integer(data: Mapping[str, Any], key: str, *, minimum: int = 0) -> int:
+def _integer(data: Mapping[str, Any], key: str, *, minimum: int = 0,
+             default: int | None = None) -> int:
     value = data.get(key)
+    if value is None and default is not None:
+        # A field a older peer does not send yet. Only ever used where the
+        # absent case has one unambiguous meaning, never to paper over a
+        # missing required field.
+        return default
     # bool is an int in Python; accepting it here would let `true` mean 1.
     if isinstance(value, bool) or not isinstance(value, int):
         raise ProtocolError(f"{key!r} must be a whole number.")
     if value < minimum:
         raise ProtocolError(f"{key!r} must be at least {minimum}.")
     return value
+
+
+def _optional_integer(data: Mapping[str, Any], key: str, *,
+                      minimum: int = 0) -> int | None:
+    """A whole number, or nothing. Absent and null both mean nothing."""
+    if data.get(key) is None:
+        return None
+    return _integer(data, key, minimum=minimum)
 
 
 def _hex_hash(data: Mapping[str, Any], key: str) -> str:
@@ -83,6 +97,10 @@ class NotePayload:
     source_trust: str
     raw_text: str
     tombstoned_at: str | None
+    # Both are hashed into the body from canon version 2, so the mirror cannot
+    # recompute the hash without them.
+    supersedes: int | None
+    canon_version: int
     seq: int
     body_hash: str
     prev_hash: str
@@ -98,6 +116,8 @@ class NotePayload:
             "source_trust": self.source_trust,
             "raw_text": self.raw_text,
             "tombstoned_at": self.tombstoned_at,
+            "supersedes": self.supersedes,
+            "canon_version": self.canon_version,
             "seq": self.seq,
             "body_hash": self.body_hash,
             "prev_hash": self.prev_hash,
@@ -117,6 +137,10 @@ class NotePayload:
             source_trust=_choice(data, "source_trust", TRUST_LEVELS),
             raw_text=_string(data, "raw_text", max_length=MAX_NOTE_CHARS),
             tombstoned_at=_optional_string(data, "tombstoned_at", max_length=64),
+            supersedes=_optional_integer(data, "supersedes", minimum=1),
+            # Absent means a note from before revisions existed, hashed under
+            # the original rules. Defaulting keeps an older laptop working.
+            canon_version=_integer(data, "canon_version", minimum=1, default=1),
             seq=_integer(data, "seq", minimum=1),
             body_hash=_hex_hash(data, "body_hash"),
             prev_hash=_hex_hash(data, "prev_hash"),
@@ -139,6 +163,8 @@ class NotePayload:
                 source_type=self.source_type,
                 source_trust=self.source_trust,
                 raw_text=self.raw_text,
+                supersedes=self.supersedes,
+                version=self.canon_version,
             )
             if recomputed != self.body_hash:
                 raise ProtocolError(

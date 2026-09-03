@@ -19,7 +19,7 @@ DEFAULT_TIMEOUT = 30.0
 
 # What this build of the laptop code expects the desktop to be able to do.
 # Raised alongside SERVICE_VERSION in desktop/service.py.
-REQUIRED_SERVICE_VERSION = 2
+REQUIRED_SERVICE_VERSION = 3
 
 
 class TransportError(Exception):

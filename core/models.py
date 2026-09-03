@@ -69,6 +69,8 @@ class Note:
     raw_text: str
     processed: bool
     tombstoned_at: str | None
+    # The note this one replaces, if it is a correction of an earlier one.
+    supersedes: int | None = None
 
     @property
     def tombstoned(self) -> bool:
@@ -222,6 +224,7 @@ def add_note(
     source_trust: str = TRUST_SELF,
     backdated_at: str | None = None,
     captured_at: str | None = None,
+    supersedes: int | None = None,
 ) -> Note:
     """Store a note and extend the chain, atomically.
 
@@ -245,17 +248,17 @@ def add_note(
     with conn:
         cursor = conn.execute(
             "INSERT INTO notes (captured_at, backdated_at, source_type, source_trust, "
-            "raw_text, processed) VALUES (?, ?, ?, ?, ?, 0)",
-            (stamped, backdated_at, source_type, source_trust, cleaned),
+            "raw_text, processed, supersedes) VALUES (?, ?, ?, ?, ?, 0, ?)",
+            (stamped, backdated_at, source_type, source_trust, cleaned, supersedes),
         )
         note_id = int(cursor.lastrowid)
         _append_chain_entry(conn, note_id, stamped, backdated_at, source_type,
-                            source_trust, cleaned)
+                            source_trust, cleaned, supersedes)
     return get_note(conn, note_id)
 
 
 def _append_chain_entry(conn, note_id, captured_at, backdated_at, source_type,
-                        source_trust, raw_text) -> None:
+                        source_trust, raw_text, supersedes=None) -> None:
     """Extend the chain by one. Must run inside the caller's transaction."""
     body = chain.body_hash(
         note_id=note_id,
@@ -264,13 +267,14 @@ def _append_chain_entry(conn, note_id, captured_at, backdated_at, source_type,
         source_type=source_type,
         source_trust=source_trust,
         raw_text=raw_text,
+        supersedes=supersedes,
     )
     entry = chain.next_entry(chain_head(conn), note_id=note_id, body=body, hashed_at=utc_now())
     conn.execute(
-        "INSERT INTO note_chain (seq, note_id, body_hash, prev_hash, entry_hash, hashed_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO note_chain (seq, note_id, body_hash, prev_hash, entry_hash, "
+        "hashed_at, canon_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (entry.seq, entry.note_id, entry.body_hash, entry.prev_hash,
-         entry.entry_hash, entry.hashed_at),
+         entry.entry_hash, entry.hashed_at, chain.CANON_VERSION),
     )
 
 
@@ -281,15 +285,25 @@ def get_note(conn: "sqlcipher3.Connection", note_id: int) -> Note:
     return _note_from_row(row)
 
 
+# A note that has been edited is still in the record and still hashed, but it is
+# no longer what the record *says*. Everything that reads notes for a person —
+# lists, bins, tagging — wants the current text, so excluding replaced notes is
+# the default and asking for them is explicit.
+SUPERSEDED = ("id IN (SELECT supersedes FROM notes WHERE supersedes IS NOT NULL)")
+
+
 def list_notes(
     conn: "sqlcipher3.Connection",
     *,
     since: str | None = None,
     until: str | None = None,
     unprocessed_only: bool = False,
+    include_replaced: bool = False,
 ) -> list[Note]:
     sql = "SELECT * FROM notes WHERE 1 = 1"
     params: list[object] = []
+    if not include_replaced:
+        sql += f" AND NOT {SUPERSEDED}"
     if since:
         sql += " AND coalesce(backdated_at, captured_at) >= ?"
         params.append(since)
@@ -331,6 +345,7 @@ def _note_from_row(row: "sqlcipher3.Row") -> Note:
         raw_text=row["raw_text"],
         processed=bool(row["processed"]),
         tombstoned_at=row["tombstoned_at"],
+        supersedes=row["supersedes"],
     )
 
 
@@ -352,6 +367,12 @@ def verify(conn: "sqlcipher3.Connection") -> chain.VerifyResult:
     A tombstoned note reports its body as None: it cannot be rechecked, and
     saying so is more honest than quietly passing it.
     """
+    entries = chain_entries(conn)
+    # Each body is rechecked under the serialisation its own entry was written
+    # with. Trying versions until one matched would let a note be edited freely
+    # in a field that only the newer version covers.
+    versions = {entry.note_id: entry.canon_version for entry in entries}
+
     bodies: dict[int, str | None] = {}
     for note in _all_notes(conn):
         if note.tombstoned:
@@ -364,8 +385,10 @@ def verify(conn: "sqlcipher3.Connection") -> chain.VerifyResult:
                 source_type=note.source_type,
                 source_trust=note.source_trust,
                 raw_text=note.raw_text,
+                supersedes=note.supersedes,
+                version=versions.get(note.id, 1),
             )
-    return chain.verify_chain(chain_entries(conn), bodies)
+    return chain.verify_chain(entries, bodies)
 
 
 def _all_notes(conn: "sqlcipher3.Connection") -> list[Note]:
@@ -380,6 +403,7 @@ def _entry_from_row(row: "sqlcipher3.Row") -> chain.ChainEntry:
         prev_hash=row["prev_hash"],
         entry_hash=row["entry_hash"],
         hashed_at=row["hashed_at"],
+        canon_version=int(row["canon_version"]),
     )
 
 
@@ -446,7 +470,7 @@ def notes_for_bin(conn: "sqlcipher3.Connection", key: str, *,
                   since: str | None = None, until: str | None = None) -> list[Note]:
     """Every note in one bin, in the order things happened."""
     sql = ("SELECT n.* FROM notes n JOIN note_tags t ON t.note_id = n.id "
-           "WHERE t.bin_id = ?")
+           f"WHERE t.bin_id = ? AND NOT n.{SUPERSEDED}")
     params: list[object] = [bin_id_for_key(conn, key)]
     if since:
         sql += " AND coalesce(n.backdated_at, n.captured_at) >= ?"
@@ -510,7 +534,13 @@ def upsert_person(conn: "sqlcipher3.Connection", person_id: int, display_name: s
 
 
 def unprocessed_notes(conn: "sqlcipher3.Connection") -> list[Note]:
-    """Notes that have not been through tagging yet, oldest first."""
-    return [_note_from_row(r) for r in conn.execute(
-        "SELECT * FROM notes WHERE processed = 0 AND tombstoned_at IS NULL ORDER BY id"
-    )]
+    """Notes still needing bin tagging.
+
+    A replaced note is skipped: its text is no longer what the record says, and
+    the model's time is far too expensive to spend on a superseded draft.
+    """
+    return [
+        _note_from_row(row) for row in conn.execute(
+            f"SELECT * FROM notes WHERE processed = 0 AND tombstoned_at IS NULL "
+            f"AND NOT {SUPERSEDED} ORDER BY id")
+    ]

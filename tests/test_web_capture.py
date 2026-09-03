@@ -230,7 +230,7 @@ def test_a_filed_note_extends_the_chain_and_still_verifies(client, dek):
         result = models.verify(conn)
     finally:
         conn.close()
-    assert result.ok, result.problems
+    assert result.ok, result.breaks
 
 
 def test_a_multiline_note_survives_the_browser_s_line_endings(client, dek):

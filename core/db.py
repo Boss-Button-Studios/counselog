@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class DatabaseError(Exception):
@@ -96,8 +96,15 @@ CREATE TABLE notes (
                   CHECK (source_trust IN ('self_authored', 'third_party')),
     raw_text      TEXT NOT NULL,
     processed     INTEGER NOT NULL DEFAULT 0,  -- has bin-tagging run
+    -- The note this one replaces. An edit never rewrites a body: it writes a
+    -- new note pointing back, so the original stays hashed and provable and the
+    -- record shows that it was changed rather than hiding it. Hashed into the
+    -- chain from canon version 2, because it decides which text the record
+    -- currently says.
+    supersedes    INTEGER REFERENCES notes(id),
     tombstoned_at TEXT                         -- set when the body is purged
 );
+CREATE UNIQUE INDEX notes_one_revision ON notes(supersedes) WHERE supersedes IS NOT NULL;
 CREATE INDEX notes_captured_at ON notes(captured_at);
 CREATE INDEX notes_unprocessed ON notes(processed) WHERE processed = 0;
 
@@ -135,6 +142,10 @@ CREATE TABLE note_chain (
     body_hash  TEXT NOT NULL,
     prev_hash  TEXT NOT NULL,
     entry_hash TEXT NOT NULL,
+    -- Which serialisation the body was hashed under, so an old entry keeps
+    -- verifying under its own rules and a new field cannot be edited freely on
+    -- an old note by claiming it predates the rule covering it.
+    canon_version INTEGER NOT NULL DEFAULT 1,
     hashed_at  TEXT NOT NULL
 );
 
@@ -206,6 +217,15 @@ CREATE TABLE signatures (
 # chain — altering a hashed field during a migration would make every note after
 # it look tampered with.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
+    4: (
+        "ALTER TABLE notes ADD COLUMN supersedes INTEGER REFERENCES notes(id)",
+        """CREATE UNIQUE INDEX notes_one_revision ON notes(supersedes)
+               WHERE supersedes IS NOT NULL""",
+        # Existing entries were hashed without `supersedes`, and the default
+        # says so. Adding a column does not rewrite their rows, so nothing that
+        # already verifies stops verifying.
+        "ALTER TABLE note_chain ADD COLUMN canon_version INTEGER NOT NULL DEFAULT 1",
+    ),
     3: (
         """CREATE TABLE spool_quarantine (
                seq             INTEGER PRIMARY KEY,

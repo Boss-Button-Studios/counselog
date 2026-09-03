@@ -611,14 +611,55 @@ Pronouns are not sent to the mirror — `PersonPayload` carries name, aliases,
 active and created_at only. The desktop does not need them to tag, and less on
 the mirror is better. Revisit when reports start writing sentences about people.
 
-**Slice 3 — editing a note, as revisions ⬜** (schema version 4)
-Decided rather than assumed, because editing text in place would re-hash the
-body and make `verify` report the note as altered — indistinguishable from
-tampering, and the schema refuses it anyway: `note_chain` has a trigger denying
-UPDATE outright. So an edit appends a revision and the original body stays
-hashed and intact. The consequence, which has to be said out loud in the
-interface: an edit corrects the record, it does not unsay anything. `forget` is
-what removes text.
+**Slice 3 — editing a note, as revisions ✅** (schema version 4)
+`core/revisions.py`, `notes.supersedes`, `note_chain.canon_version`, canon
+version 2, edit routes and the revision history on the note page.
+
+An edit appends. The correction is a new note pointing back at the one it
+replaces; the original keeps its text, its hash and its place in the chain.
+Editing in place was never really on the table — it would re-hash the body and
+make `verify` report the note as altered, which is exactly what it *should*
+report, and `note_chain`'s trigger refuses the UPDATE regardless.
+
+**`supersedes` had to be hashed, and that forced a canon version.** The link
+decides which text the record currently *says*, so leaving it outside the chain
+would let a note be buried behind a fabricated revision with `verify` still
+clean — the tool vouching for a history it had stopped showing. Hashing it
+changes the note serialisation, so `CANON_VERSION` went to 2 and each chain
+entry now records the version its body was hashed under. Recorded rather than
+guessed: trying each version until one matched would let an attacker pick the
+serialisation that ignores the field they changed. The append-only trigger means
+the recorded version cannot be walked back either.
+
+Verified against a database built by the *previous* build: it migrates to v4,
+its v1-hashed note still verifies, and editing it appends a v2-hashed revision —
+both versions in one chain, verify clean.
+
+Knock-on effects, none of them optional:
+
+- `NotePayload` carries both fields and `SERVICE_VERSION` went to 3. Without
+  them the desktop recomputes a different body hash and refuses every note. An
+  older laptop that sends neither is read as version 1, which is what its notes
+  were hashed under.
+- Everything that reads notes now reads the *current* one — lists, bins and
+  tagging all skip replaced notes. A correction inherits the original's tags so
+  it does not drop out of its reports the moment it is edited, but stays
+  unprocessed so tagging revisits it: the text changed, so the bins may need to.
+- Threads are ordered by when the *original* was written. Correcting last
+  month's note must not move it to the top of today.
+- A note can be corrected once. Two corrections of the same note would fork the
+  thread, leaving no single answer to what it says now.
+
+**A migration test was quietly lying.** It rewound the schema but left bodies
+hashed under the current rules, so it asserted something no older database ever
+contained — and would have hidden whether a genuinely old record survives coming
+forward, which is the only thing that matters for a database already holding
+notes. It now rewrites the chain under version 1 as part of rewinding.
+
+Also learned: SQLite refuses `DROP COLUMN` on a trailing column whose definition
+is preceded by a comment block — the edit leaves a dangling comma. Only the test
+helper drops columns, but both new columns are placed off the end of their
+tables so it stays possible.
 
 **Slice 4 — a verify page ⬜**
 `models.verify` already exists and is CLI-only. The page must repeat what the

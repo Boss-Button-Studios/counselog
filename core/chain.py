@@ -28,13 +28,20 @@ from __future__ import annotations
 import hashlib
 import struct
 from dataclasses import dataclass
-from typing import Iterable, Sequence
+from typing import Iterable
 
 # A change to how notes are serialised changes every hash after it, so the
-# version is baked into the bytes. An old chain stays verifiable under its own
-# version rather than silently failing under new rules.
-CANON_VERSION = 1
-CANON_PREFIX = b"counselog-note-v1"
+# version is baked into the bytes *and* recorded on the entry. An old chain
+# stays verifiable under its own version rather than silently failing under new
+# rules — and, just as important, a new field cannot be edited freely on an old
+# note by claiming it predates the rule that covers it: the entry says which
+# version it was hashed under, so there is nothing to choose between.
+#
+# v2 added `supersedes`, the link an edit leaves behind. It has to be hashed:
+# it decides which text the record currently says, so leaving it outside would
+# let a note be hidden behind a fabricated revision with `verify` still clean.
+CANON_VERSION = 2
+FIRST_VERSION_WITH_SUPERSEDES = 2
 
 # The chain has to start somewhere. Sixty-four zeros is conventional and
 # unmistakable in a dump.
@@ -51,6 +58,10 @@ class ChainEntry:
     prev_hash: str
     entry_hash: str
     hashed_at: str
+    # Which serialisation this body was hashed under. Stored rather than
+    # guessed: trying each version until one matches would let an attacker pick
+    # the version that ignores the field they changed.
+    canon_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -99,22 +110,31 @@ def canonical_note(
     source_type: str,
     source_trust: str,
     raw_text: str,
+    supersedes: int | None = None,
+    version: int = CANON_VERSION,
 ) -> bytes:
     """The exact bytes that represent a note for hashing.
 
     Keyword-only and explicit: adding a field here silently changes every future
     hash, so it should be impossible to do by accident through positional args.
     The text must already be sanitized — hash what is stored, not what was typed.
+
+    New fields are appended and gated on `version`, never inserted, so the bytes
+    an older version produced stay exactly what they were.
     """
-    parts: Sequence[bytes] = (
-        CANON_PREFIX,
+    parts: list[bytes] = [
+        f"counselog-note-v{version}".encode("ascii"),
         str(note_id).encode("utf-8"),
         captured_at.encode("utf-8"),
         (backdated_at or "").encode("utf-8"),
         source_type.encode("utf-8"),
         source_trust.encode("utf-8"),
         raw_text.encode("utf-8"),
-    )
+    ]
+    if version >= FIRST_VERSION_WITH_SUPERSEDES:
+        # 0 rather than empty for "supersedes nothing", so the field is never
+        # the same bytes as an absent one.
+        parts.append(str(supersedes or 0).encode("ascii"))
     return b"".join(length_prefixed(part) for part in parts)
 
 

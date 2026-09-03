@@ -31,7 +31,7 @@ log = logging.getLogger("counselogd")
 # of answering "No such endpoint" to a request it has never heard of.
 #   1: session, sync, mirror/status   (phase 3)
 #   2: + people, tag                  (phase 4)
-SERVICE_VERSION = 2
+SERVICE_VERSION = 3
 
 
 def _device() -> str:

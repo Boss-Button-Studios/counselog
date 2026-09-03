@@ -18,6 +18,14 @@
 
   <h1>{{ note.occurred_at | friendly_time }}</h1>
 
+  {% if thread and thread.edited and note.id != thread.current.id %}
+    <p class="notice" role="status">
+      This is an earlier version, kept because the record does not rewrite
+      itself. <a href="{{ url_for('note_detail', note_id=thread.current.id) }}">See
+      what the note says now</a>.
+    </p>
+  {% endif %}
+
   <p class="aside">
     Written {{ note.captured_at | friendly_time }}
     {% if note.backdated_at %}
@@ -27,13 +35,64 @@
     {% if note.source_trust == "third_party" %} · written by someone else{% endif %}
   </p>
 
-  {% if note.tombstoned %}
+  {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if editing %}
+    <form method="post" action="{{ url_for('save_edit', note_id=note.id) }}">
+      <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+      <label for="text">Correct this note</label>
+      <textarea id="text" name="text" rows="9" required autofocus
+                spellcheck="false" autocapitalize="sentences">{{ draft }}</textarea>
+      <p class="aside">
+        <strong>An edit corrects the record; it does not unsay anything.</strong>
+        What is written now stays, marked as replaced, and both stay provable.
+        That is what lets the record mean something later. To remove text
+        instead, clear the note.
+      </p>
+      <button type="submit">Save the correction</button>
+      <a class="cancel" href="{{ url_for('note_detail', note_id=note.id) }}">Cancel</a>
+    </form>
+  {% elif note.tombstoned %}
     <p class="notice" role="status">
       Cleared {{ note.tombstoned_at | friendly_time }}. The text is gone; its
       place in the record remains.
     </p>
   {% else %}
     <div class="note-text">{{ note.raw_text }}</div>
+  {% endif %}
+
+  {% if thread and thread.edited %}
+    <h2>What this note has said</h2>
+    <p class="aside">
+      {{ thread.edit_count }}
+      correction{{ "" if thread.edit_count == 1 else "s" }}. Each version keeps
+      its own place in the record and can still be checked.
+    </p>
+    <ul class="rows">
+      {% for version in thread.revisions %}
+        <li>
+          <div>
+            <span class="when">
+              {{ version.captured_at | friendly_time }}
+              {% if version.id == thread.current.id %}
+                <span class="marker">what it says now</span>
+              {% else %}
+                <span class="marker">replaced</span>
+              {% endif %}
+            </span>
+            <span class="{{ 'gone' if version.tombstoned else 'text' }}">
+              {% if version.id == note.id %}
+                {{ version.raw_text | preview }}
+              {% else %}
+                <a href="{{ url_for('note_detail', note_id=version.id) }}">{{ version.raw_text | preview }}</a>
+              {% endif %}
+            </span>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
   {% endif %}
 
   {% if tags %}
@@ -62,7 +121,10 @@
 
   <p class="aside">
     <a href="{{ url_for('note_list') }}">All notes</a>
-    {% if not note.tombstoned and not confirming %}
+    {% if not note.tombstoned and not confirming and not editing %}
+      {% if thread and note.id == thread.current.id %}
+        · <a href="{{ url_for('edit_note', note_id=note.id) }}">Correct this note</a>
+      {% endif %}
       · <a class="danger-link" href="{{ url_for('confirm_clear', note_id=note.id) }}">Clear this note</a>
     {% endif %}
   </p>

@@ -7,13 +7,17 @@ Clearing a note goes through the same tombstone the CLI's `forget` uses: the
 text goes, the chain entry stays, and the surrounding history stays verifiable.
 It is deliberately two steps, because it is the one irreversible thing this
 interface can do and a phone is an easy place to hit the wrong control.
+
+Editing appends rather than rewrites — see `core/revisions.py`. The page has to
+say so plainly, because "edit" normally means the old version is gone, and here
+it is not.
 """
 
 from __future__ import annotations
 
-from flask import g, redirect, render_template, url_for
+from flask import g, redirect, render_template, request, url_for
 
-from core import models
+from core import models, revisions
 from web.access import open_database, requires_unlock
 
 
@@ -25,9 +29,10 @@ def register(app) -> None:
         """Newest first: the note you want is nearly always the recent one."""
         conn = open_database()
         try:
-            notes = list(reversed(models.list_notes(conn)))
-            return render_template("notes.html", caller=g.caller, notes=notes,
-                                   cleared=sum(1 for note in notes if note.tombstoned))
+            threads = list(reversed(revisions.threads(conn)))
+            return render_template(
+                "notes.html", caller=g.caller, threads=threads,
+                cleared=sum(1 for t in threads if t.current.tombstoned))
         finally:
             conn.close()
 
@@ -39,8 +44,7 @@ def register(app) -> None:
             note = _find(conn, note_id)
             if note is None:
                 return _no_such_note()
-            return render_template("note.html", caller=g.caller, note=note,
-                                   tags=_labelled_tags(conn, note_id), confirming=False)
+            return _note_page(conn, note)
         finally:
             conn.close()
 
@@ -59,8 +63,7 @@ def register(app) -> None:
                 return _no_such_note()
             if note.tombstoned:
                 return redirect(url_for("note_detail", note_id=note_id))
-            return render_template("note.html", caller=g.caller, note=note,
-                                   tags=_labelled_tags(conn, note_id), confirming=True)
+            return _note_page(conn, note, confirming=True)
         finally:
             conn.close()
 
@@ -78,6 +81,52 @@ def register(app) -> None:
         finally:
             conn.close()
         return redirect(url_for("note_detail", note_id=note_id))
+
+    @app.get("/notes/<int:note_id>/edit")
+    @requires_unlock
+    def edit_note(note_id: int):
+        conn = open_database()
+        try:
+            note = _find(conn, note_id)
+            if note is None:
+                return _no_such_note()
+            if note.tombstoned:
+                return redirect(url_for("note_detail", note_id=note_id))
+            return _note_page(conn, note, editing=True, draft=note.raw_text)
+        finally:
+            conn.close()
+
+    @app.post("/notes/<int:note_id>/edit")
+    @requires_unlock
+    def save_edit(note_id: int):
+        """Append a correction. Never rewrite what is already in the record."""
+        draft = request.form.get("text") or ""
+        conn = open_database()
+        try:
+            note = _find(conn, note_id)
+            if note is None:
+                return _no_such_note()
+            try:
+                revision = revisions.revise(conn, note_id, draft)
+            except (revisions.RevisionError, models.ModelError) as exc:
+                return _note_page(conn, note, editing=True, draft=draft,
+                                  error=str(exc)), 400
+        finally:
+            conn.close()
+        return redirect(url_for("note_detail", note_id=revision.id))
+
+
+def _note_page(conn, note: models.Note, *, confirming: bool = False,
+               editing: bool = False, draft: str | None = None,
+               error: str | None = None):
+    """One place that renders a note, in whichever of its three states."""
+    thread = revisions.thread_for(conn, note.id)
+    return render_template(
+        "note.html", caller=g.caller, note=note, thread=thread,
+        tags=_labelled_tags(conn, note.id), confirming=confirming,
+        editing=editing, draft=draft if draft is not None else note.raw_text,
+        error=error,
+    )
 
 
 def _find(conn, note_id: int) -> models.Note | None:

@@ -71,15 +71,17 @@ def _insert(conn: "sqlcipher3.Connection", payload: NotePayload) -> None:
     """
     conn.execute(
         "INSERT INTO notes (id, captured_at, backdated_at, source_type, source_trust, "
-        "raw_text, processed, tombstoned_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
+        "raw_text, processed, tombstoned_at, supersedes) "
+        "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
         (payload.note_id, payload.captured_at, payload.backdated_at, payload.source_type,
-         payload.source_trust, payload.raw_text, payload.tombstoned_at),
+         payload.source_trust, payload.raw_text, payload.tombstoned_at,
+         payload.supersedes),
     )
     conn.execute(
-        "INSERT INTO note_chain (seq, note_id, body_hash, prev_hash, entry_hash, hashed_at) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO note_chain (seq, note_id, body_hash, prev_hash, entry_hash, "
+        "hashed_at, canon_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (payload.seq, payload.note_id, payload.body_hash, payload.prev_hash,
-         payload.entry_hash, payload.hashed_at),
+         payload.entry_hash, payload.hashed_at, payload.canon_version),
     )
 
 
@@ -91,7 +93,8 @@ def to_payloads(conn: "sqlcipher3.Connection", *, after_seq: int = 0) -> list[No
     right than two.
     """
     rows = conn.execute(
-        "SELECT c.seq, c.body_hash, c.prev_hash, c.entry_hash, c.hashed_at, n.* "
+        "SELECT c.seq, c.body_hash, c.prev_hash, c.entry_hash, c.hashed_at, "
+        "c.canon_version, n.* "
         "FROM note_chain c JOIN notes n ON n.id = c.note_id "
         "WHERE c.seq > ? ORDER BY c.seq",
         (after_seq,),
@@ -105,6 +108,8 @@ def to_payloads(conn: "sqlcipher3.Connection", *, after_seq: int = 0) -> list[No
             source_trust=row["source_trust"],
             raw_text=row["raw_text"],
             tombstoned_at=row["tombstoned_at"],
+            supersedes=row["supersedes"],
+            canon_version=int(row["canon_version"]),
             seq=int(row["seq"]),
             body_hash=row["body_hash"],
             prev_hash=row["prev_hash"],

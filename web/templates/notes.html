@@ -4,20 +4,26 @@
 
   <h1>Your notes</h1>
 
-  {% if notes %}
+  {% if threads %}
     <p class="aside">
-      {{ notes | length }} note{{ "" if notes | length == 1 else "s" }}, newest
-      first{% if cleared %}, {{ cleared }} of them cleared{% endif %}.
+      {{ threads | length }} note{{ "" if threads | length == 1 else "s" }},
+      newest first{% if cleared %}, {{ cleared }} of them cleared{% endif %}.
     </p>
 
     <ul class="rows notes">
-      {% for note in notes %}
+      {% for thread in threads %}
+        {% set note = thread.current %}
         <li>
+          {# Linked by the current revision, but timed by the original: a note
+             corrected today belongs where it was written, not at the top. #}
           <a href="{{ url_for('note_detail', note_id=note.id) }}">
             <span class="when">
-              {{ note.occurred_at | friendly_time }}
-              {% if note.backdated_at %}
+              {{ thread.root.occurred_at | friendly_time }}
+              {% if thread.root.backdated_at %}
                 <span class="marker" title="recorded as happening earlier than it was written">backdated</span>
+              {% endif %}
+              {% if thread.edited %}
+                <span class="marker">edited</span>
               {% endif %}
               {% if note.tombstoned %}
                 <span class="marker">cleared</span>
