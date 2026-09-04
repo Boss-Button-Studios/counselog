@@ -30,7 +30,10 @@ TAG_TIMEOUT_PER_NOTE = 300.0
 @click.option("--limit", type=int, default=20, show_default=True,
               help="How many notes to tag in one run.")
 @click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None)
-def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None) -> None:
+@click.option("--device", default="laptop", show_default=True,
+              help="Which enrolled identity to present.")
+def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None,
+        device: str) -> None:
     """Sort new notes into bins.
 
     Names you have listed are matched exactly and cost nothing. Whether a note
@@ -44,7 +47,12 @@ def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None) 
     except db.DatabaseError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    client = DesktopClient.from_config(loopback=loopback)
+    # Not always 'laptop'. The certificate a machine presents is its own, and
+    # `certs prune` deliberately removes every other device's key — so on the
+    # machine that holds the record and also runs the service, the only identity
+    # available is the one enrolled for it. Without this, sorting could not be
+    # run at all there (Guideline 4: the identity you hold, not one you borrow).
+    client = DesktopClient.from_config(loopback=loopback, device=device)
     session_id = None
     try:
         pending = models.unprocessed_notes(conn)[:limit]

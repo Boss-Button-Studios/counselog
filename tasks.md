@@ -871,6 +871,20 @@ Raised while playtesting; recorded so they are not rediscovered later.
   so this is scope rather than an oversight — `core/reports` already works on
   any bin key, so it is a route and a heading when it is wanted.
 
+### Found while sorting a real record: `tag` could only be the laptop
+
+`counselog tag` and `counselog sync` always presented the `laptop` certificate,
+and `certs prune` deliberately deletes every other device's key from the machine
+it runs on. So on the machine that holds the record *and* runs the service,
+sorting could not be run at all — the only identity available there is the one
+enrolled for it, and neither command would use it. `doctor` already had
+`--device`; these two now do too, defaulting to `laptop` so nothing changes for
+the laptop itself.
+
+Worth keeping in mind for phase 8: the two-machine split is real, but a single
+machine playing both roles is the normal development case, and a command that
+can only be one of the roles will keep hitting this.
+
 ## Phase 7 — PIV signing *(laptop)*
 
 `core/crypto/signing.py`.

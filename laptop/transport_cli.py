@@ -194,7 +194,9 @@ def doctor(loopback: bool, device: str) -> None:
 @click.command("sync")
 @click.option("--loopback", is_flag=True, help="Talk to a service on this machine.")
 @click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None)
-def sync(loopback: bool, unlock_with: str | None) -> None:
+@click.option("--device", default="laptop", show_default=True,
+              help="Which enrolled identity to present.")
+def sync(loopback: bool, unlock_with: str | None, device: str) -> None:
     """Send new notes to the desktop.
 
     Tagging arrives in the next phase; for now this copies notes to the
@@ -210,7 +212,7 @@ def sync(loopback: bool, unlock_with: str | None) -> None:
     except db.DatabaseError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    client = DesktopClient.from_config(loopback=loopback)
+    client = DesktopClient.from_config(loopback=loopback, device=device)
 
     # Law 2: say what is leaving this machine, where it is going, and how it is
     # protected — every time, in one line.

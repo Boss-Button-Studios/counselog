@@ -72,6 +72,40 @@ def _tag(run):
     return run(["tag", "--loopback", "--unlock-with", "password"], stdin=f"{PASSWORD}\n")
 
 
+# ── which identity we present ────────────────────────────────────────────────
+
+
+def test_tagging_can_present_an_identity_that_is_not_the_laptop(ready, monkeypatch):
+    """The machine holding the record is not always called 'laptop'.
+
+    Found trying to sort a real record on the desktop that holds it: `tag` always
+    presented `laptop`, whose key `certs prune` deliberately removes from every
+    machine but the laptop itself. Sorting could not be run there at all.
+    """
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    ready(["certs", "enroll", "deskclient"])
+    _note(ready, "Sarah pushed back on the timeline.")
+
+    result = ready(["tag", "--loopback", "--device", "deskclient",
+                    "--unlock-with", "password"], stdin=f"{PASSWORD}\n")
+
+    assert result.exit_code == 0, result.output
+    with _open() as conn:
+        note = models.unprocessed_notes(conn)
+    assert note == []  # it was sorted, so nothing is left unprocessed
+
+
+def test_an_identity_with_no_key_here_is_reported_plainly(ready):
+    """The failure someone actually hits, and it must name the fix."""
+    _note(ready, "Sarah pushed back on the timeline.")
+
+    result = ready(["tag", "--loopback", "--device", "absent",
+                    "--unlock-with", "password"], stdin=f"{PASSWORD}\n")
+
+    assert result.exit_code != 0
+    assert "certificate" in result.output.lower()
+
+
 # ── tagging ──────────────────────────────────────────────────────────────────
 
 
