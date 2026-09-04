@@ -53,16 +53,24 @@ SELF_TEAM_SCHEMA = {
     "required": ["self", "self_confidence", "team", "team_confidence"],
 }
 
-PROMPT = """A supervisor wrote this note. Answer two questions about it.
+# The note comes FIRST, and that ordering is load-bearing — see
+# `judge_self_team` for the measurement. With the instructions first, every
+# request in a run shares a long identical prefix, the runtime reuses the cached
+# state for it, and the answer starts depending on what was asked before. Put
+# the note first and consecutive requests share nothing, so each is processed
+# the same way whatever its position. Anyone tidying this back into "question,
+# then data" order will reintroduce a bug that only shows up on the second note
+# of a run — `tests/test_tagging.py` guards it.
+PROMPT = """Note:
+{note}
+
+A supervisor wrote the note above. Answer two questions about it.
 
 self: Is the note about the supervisor's OWN work, habits, or decisions?
 team: Is the note about the team AS A WHOLE, rather than one individual?
 
 Both are false if the note is only about one other person.
-Give a confidence from 0 to 1 for each answer.
-
-Note:
-{note}"""
+Give a confidence from 0 to 1 for each answer."""
 
 
 class TaggingUnavailable(Exception):
@@ -132,9 +140,31 @@ def judge_self_team(
 
     Temperature zero and a fixed seed, asking for repeatability: a
     probabilistic step in an otherwise deterministic pipeline should at least
-    try to be stable (Law 7).
+    try to be stable (Law 7). The prompt puts the note *before* the
+    instructions for the same reason, and that is not cosmetic — it is the fix
+    for the instability described below.
 
-    Do not mistake that for a guarantee. Measured on the reference desktop:
+    **Why the note goes first.** Every request here is stateless and carries its
+    own complete prompt, but the runtime keeps the model loaded and reuses
+    cached state for any prefix a new prompt shares with the last one. With the
+    instructions first, every note in a run shared that whole prefix, so a
+    request that hit the cache processed a handful of new tokens where a miss
+    processed hundreds — different work, slightly different arithmetic, and at
+    temperature zero a near-tie falls the other way. Measured 2026-09-04, asking
+    note A, then note B, then note A again:
+
+      - instructions first: `self` 0.95, then `team`, then **no bins** for the
+        same note A — and not a dropped answer either, but a confident wrong one
+        (`self: false` at 0.8)
+      - note first: `self`, `team`, `self` — the same answer both times, at no
+        extra cost (95s, 99s, 96s)
+      - `keep_alive: 0`, unloading between calls: also stable, and roughly twice
+        the time per note (121s, 181s, 266s)
+
+    So the ordering buys stability for free, and unloading is the fallback if a
+    future runtime caches differently.
+
+    Do not mistake any of this for a guarantee. Also measured, earlier:
 
       - four back-to-back calls with the same note: byte-identical answers
       - the same note alone: {"self": true, confidence 0.9}

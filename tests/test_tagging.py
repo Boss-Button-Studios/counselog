@@ -95,6 +95,36 @@ def _answer(**fields):
     return {"message": {"content": _json.dumps(fields)}}
 
 
+def test_the_note_is_sent_before_the_instructions(monkeypatch):
+    """Not a style choice — it is what keeps an answer from depending on which
+    note was asked before it.
+
+    With the instructions first, every request in a run shares a long identical
+    prefix, the runtime reuses its cached state, and the same note answered
+    `self` at 0.95 first and no bins at all third (measured 2026-09-04, see
+    `judge_self_team`). The note first, nothing is shared. A tidy-up that
+    restores "question, then data" order brings the bug back, and it only shows
+    from the second note of a run onwards — so it is guarded here.
+    """
+    sent = {}
+
+    def capture(url, json=None, timeout=None, **kwargs):
+        sent["content"] = json["messages"][0]["content"]
+        request = httpx.Request("POST", url)
+        return httpx.Response(200, json=_answer(
+            self=False, self_confidence=0.9, team=False, team_confidence=0.9),
+            request=request)
+
+    monkeypatch.setattr(httpx, "post", capture)
+    tagger.judge_self_team("the note itself")
+
+    content = sent["content"]
+    assert content.index("the note itself") < content.index("self:"), content
+    # And the note is not merely first, it is at the very top: anything ahead of
+    # it is prefix that every request in a run would share again.
+    assert content.startswith("Note:\n"), content
+
+
 def test_the_model_is_asked_only_about_self_and_team(monkeypatch):
     """Asking it to pick from all bins produced confident nonsense; see the
     module docstring in desktop/tagger.py."""

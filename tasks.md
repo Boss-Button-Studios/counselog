@@ -866,17 +866,12 @@ Raised while playtesting; recorded so they are not rediscovered later.
   and which are the model's, because the whole value of the digest is that it is
   the former. Worth doing once there are enough notes to judge whether the raw
   version is actually hard to read.
-- **"No bin matched" cannot be told from "the model dropped it."** Sorting a
-  note asks the model one question, and a run of notes asks it repeatedly — but
-  the answer depends on the note's position in that run (measured 2026-09-04,
-  see `tagger.judge_self_team`). A note that scores `self` at 0.95 asked alone
-  returns nothing asked third. Today both outcomes print "no bin matched" and
-  write no tag, so a note silently missing from a digest looks exactly like a
-  note the model considered and declined. Worth trying, cheapest first: unload
-  between calls (`keep_alive: 0`), pace the run, or re-ask once when the answer
-  is empty — 90 s to be sure a note really has no bin is a fair price when the
-  alternative is a digest quietly missing it. The provenance work already
-  ensures a person's answer survives whatever this settles on.
+- **"No bin matched" still cannot be told from "the model changed its mind."**
+  Much narrower since the note-first fix (see phase 4 below), but not gone: an
+  empty answer prints the same line whether the model considered the note and
+  declined it or simply answered differently this time. The model does return a
+  confidence on its "no" — `self: false` at 0.8 — and nothing records or shows
+  it. Cheap to improve whenever the tagging output is next touched.
 - **Digests for the `self` and `team` bins.** Notes sort into three kinds of
   bin, and only the per-person one has a page. §9 asks for exactly one report,
   so this is scope rather than an oversight — `core/reports` already works on
@@ -895,6 +890,35 @@ the laptop itself.
 Worth keeping in mind for phase 8: the two-machine split is real, but a single
 machine playing both roles is the normal development case, and a command that
 can only be one of the roles will keep hitting this.
+
+### Phase 4, revisited: the tagging instability, fixed
+
+The model's answer depended on where the note sat in a run. Cause: every request
+carried the instructions first, so consecutive prompts shared a long identical
+prefix, the runtime reused the cached state for it, and a request that hit the
+cache did far less work than one that missed — different arithmetic, and at
+temperature zero a near-tie falls the other way.
+
+The note now goes first, so consecutive requests share nothing and each is
+processed the same way whatever its position. Measured 2026-09-04 on
+deepseek-r1:14b, six hand-labelled notes plus a repeat of the first:
+
+| | labelled set | first note, asked again at the end |
+|---|---|---|
+| instructions first (old) | 6/6 | flipped to neither — unstable |
+| note first (now) | 6/6 | unchanged — stable |
+
+Reproduced twice, both times. No accuracy cost and no extra time; `keep_alive: 0`
+also fixes it and costs roughly double per note, so it is the fallback if a
+future runtime caches differently.
+
+**Why this mattered more than it looked.** The old ordering scored 6/6 on a fresh
+run and only failed on a *repeat* ask — which is the case this design hits most,
+because every correction re-queues its note for sorting. The notes most likely to
+be re-asked are the ones someone cared enough to fix.
+
+`tests/test_tagging.py` guards the ordering, because it reads like a style choice
+and reverting it reintroduces a bug that only shows from the second note onwards.
 
 ## Phase 7 — PIV signing *(laptop)*
 
