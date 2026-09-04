@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Reports · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Who you have written about</h1>
+
+  <p class="aside">
+    Counts of notes, and how long since the last one. Nothing here is a
+    judgment about anybody — a quiet month may be a good month. It is only what
+    the record contains, so it can show what you have <em>not</em> written down.
+  </p>
+
+  {% if unsorted %}
+    <p class="notice" role="status">
+      {{ unsorted }} note{{ "" if unsorted == 1 else "s" }}
+      {{ "has" if unsorted == 1 else "have" }} not been sorted into a bin yet,
+      so {{ "it is" if unsorted == 1 else "they are" }} in none of these
+      digests. Sorting runs on the desktop, with <code>counselog tag</code>.
+    </p>
+  {% endif %}
+
+  {% if here or gone %}
+    {% macro line(row) %}
+      <li>
+        <div>
+          <a href="{{ url_for('person_digest', person_id=row.person.id) }}">
+            <strong>{{ row.person.display_name }}</strong></a>
+          <span class="aside">
+            {% if row.never %}
+              nothing written yet
+            {% else %}
+              {{ row.note_count }} note{{ "" if row.note_count == 1 else "s" }} ·
+              {% if row.days_since is none %}
+                {# The note carries a date nothing can read. Shown as it is
+                   stored, because seeing the odd value is what explains it. #}
+                last one dated {{ row.last_at }}, which is not a date
+              {% else %}
+                last one {{ recency(row.days_since) }}
+                ({{ row.last_at | friendly_time }})
+              {% endif %}
+            {% endif %}
+          </span>
+        </div>
+        <a class="quiet-link"
+           href="{{ url_for('person_detail', person_id=row.person.id) }}">Their names</a>
+      </li>
+    {% endmacro %}
+
+    {% if here %}
+      <ul class="rows">
+        {% for row in here %}{{ line(row) }}{% endfor %}
+      </ul>
+      <p class="aside">
+        Longest gap first, and anyone with nothing written about them at the
+        top. That order is the point: a name sorted alphabetically tells you who
+        is on the list, which you already know.
+      </p>
+    {% endif %}
+
+    {% if gone %}
+      <h2>No longer on the team</h2>
+      <p class="aside">
+        Kept because their notes are still part of the record and still readable.
+      </p>
+      <ul class="rows">
+        {% for row in gone %}{{ line(row) }}{% endfor %}
+      </ul>
+    {% endif %}
+  {% else %}
+    <p>
+      Nobody on the list yet.
+      <a href="{{ url_for('people_list') }}">Add the people you write about</a>
+      and their notes will be sorted to them.
+    </p>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">Your notes</a> ·
+    <a href="{{ url_for('people_list') }}">People</a> ·
+    <a href="{{ url_for('home') }}">Write a note</a>
+  </p>
+
+{% endblock %}

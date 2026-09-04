@@ -25,11 +25,12 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
-| Phase 6 — The browser interface | 🟨 Parts 1–3 done (506 tests) | desktop |
+| Phase 6 — The browser interface | ✅ Complete (559 tests, 91% cov) | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
 | Phase 8 — Harden + docs | ⬜ Not started | both |
 
-Phases 0–6 are buildable entirely on the desktop. Only phase 7 needs the laptop.
+Phases 0–6 are buildable entirely on the desktop. Only phase 7 needs the laptop,
+which is now the whole of what is left before hardening.
 
 Phase 6 absorbed what earlier drafts listed as separate reports and read-UI
 phases. Once the interface moved to a browser (phase 5), a "Flask read UI" was
@@ -417,7 +418,7 @@ machine before any browser can reach it.
 ## Phase 6 — The browser interface
 
 `counselogweb`. Capture, reading, and reports, all in the browser served over
-the tailnet. Four parts; two are done.
+the tailnet. Four parts, all done.
 
 ### Part 1 — the sealed spool ✅
 
@@ -688,26 +689,6 @@ same idea, and costs one line to offer.
 
 Part 3 is complete.
 
-### Backlog — wanted, not scheduled
-
-Raised while playtesting; recorded so they are not rediscovered later.
-
-- **Offline spelling and grammar help.** Wanted more once editing means a
-  permanent revision rather than a silent fix. Must not be the browser's, for
-  the reason above. The local model could do it, but that is a slow round trip
-  for a typo, so this needs thought rather than an obvious answer.
-- **Reprocessing on much weaker hardware.** Re-sorting every correction is a
-  deliberate trade: local inference is slow (deepseek-r1:14b measured at ~88 s a
-  note) and the machine's time is what it is for. Someone running this on a
-  laptop that struggles would want the choice, which means the policy wants to
-  stay in one obvious place rather than spread across the edit path.
-- **File ingest in the browser.** `counselog import` already exists in the CLI,
-  one file to one note, with `--third-party` setting `source_trust` so the
-  stronger sanitization of spec §10 can be applied later. The browser has no
-  equivalent. Note that spec §7 deliberately scoped sanitization to
-  self-authored text; a file arriving from elsewhere is the case that scoping
-  was deferring, so this is not purely an interface job.
-
 ### Part 3, slice 5 — who decided a note belongs in a bin ✅ (schema version 5)
 
 `core/tags.py` (extracted from `models.py` first, unchanged, as its own commit),
@@ -743,18 +724,117 @@ on a person actually checked. `TagDecision.checked` is deliberately true only
 for a human decision — an exact name match is reliable, but nobody read it, and
 a report that conflated the two would be overstating itself.
 
-### Part 4 — reports + dashboard ⬜
+### Part 4 — reports + dashboard ✅
 
-`desktop/reporter.py`, as pages rather than CLI commands.
+`core/reports.py`, `web/views/reports.py`, `reports.html` and `digest.html`. Two
+pages: the per-person digest, and a dashboard of how recently each person has
+been written about. No schema change — everything either page needs was already
+in the record.
 
-- Per-person digest: chronological, deterministic cleanup only (whitespace and
-  markdown). §9 says no synthesis; Law 7 wants predictable output. LLM polish
-  sits behind an explicit `--polish`.
-- Says what it is built on: how many notes, how many carrying a tag a person
-  checked, and how many still resting on the model's own judgment. Unchecked
-  notes appear, marked — never omitted.
-- Backdated notes shown at `backdated_at` with a visible marker.
-- Dashboard: note count and days-since-last per person. Pure SQL, no LLM.
+**It is `core/reports.py`, not `desktop/reporter.py` as planned.** The plan put
+the reporter on the desktop because that is where the model lives, and there is
+no model in this. A digest is a read of the laptop's own record — a join, a
+sort, and some whitespace — so building it on the desktop would mean shipping
+notes across a machine boundary to do work that is already sitting on top of the
+data. `core/` is right because both machines may legitimately assemble one.
+
+**Chronology means when it happened, not when it was typed.** A backdated note
+sits at `backdated_at`, marked as such. A corrected note sits where the
+*original* was written, showing its current text — correcting last month's note
+must not move it to the top of today. The notes list already ordered threads
+that way; a report that disagreed would have people reading two orders of the
+same events.
+
+**`tidy` may change spacing and never a word.** Trailing spaces go, a run of
+blank lines becomes one, and `*` and `+` bullets become `-`, so a digest of
+notes written across three months does not read as three documents. A bullet is
+only recognised with a space after the marker, which keeps `*emphasis*` and
+`2 + 2` out of it. It is idempotent by construction and tested as such: a
+cleanup that keeps changing its own output means two readers of one note can see
+different text (Law 7). The page says it tidies spacing and that the words are
+as written, with every note one tap from its own page to check against.
+
+**The digest counts three kinds of answer separately** — a person checked it, a
+name matched exactly, or the model guessed — because they are not the same
+quality of fact. Each note carries its own marker where it sits, guesses
+included. Nothing is omitted for being unchecked: leaving those out is what
+would make the page look better checked than it is, and this is a document
+someone may carry into a difficult conversation. A cleared note appears too, as
+having existed, since dropping it silently would understate what was written.
+
+**A range it cannot read shows nothing rather than something else.** Dates come
+in as `YYYY-MM-DD` only — `date.fromisoformat` also accepts `20260301` and week
+dates, and someone who typed one and got a different range would have no way to
+tell (Law 5). A backwards range is refused for the same reason: a digest headed
+"June to January" and showing nothing looks exactly like a person nobody has
+written about, and those want very different reactions. The form keeps what was
+typed while it complains, and is a GET, so the range you are reading is in the
+address and can be kept.
+
+Both ends are whole days. The end of a day is spelled `T23:59:59.999999`, which
+works because `.` sorts above the `+` that opens a timezone offset — so a note
+at `23:59:59+00:00` on the last day is inside the range and one at `00:00:00`
+the next morning is not. Text comparison, the way every other date filter in the
+record already works.
+
+**The dashboard is ordered by silence, not by name.** Longest gap first, with
+anyone who has nothing written about them at the top. Sorted alphabetically it
+would tell you who is on your list, which you already know; sorted this way the
+person you have not written about since March is where you will see them. It
+also declares how many notes are not sorted into any bin yet — without that, an
+empty digest reads as "nothing was ever written" when it means "nothing has been
+sorted".
+
+Two smaller findings. A gap can be unknown for two different reasons — nothing
+written, or a `backdated_at` that will not parse, which the schema permits — and
+the page says which rather than folding both into one phrase. And people who
+have left the team keep their line, in their own section: their notes are still
+in the record and still readable, so their count is still true.
+
+**LLM polish is not built.** The plan had it behind an explicit `--polish`;
+there is no CLI here to carry a flag, and as a button it is a slice of its own —
+a report endpoint on the desktop, a prompt, a schema constraint, and a session
+handshake, all to produce text that reads like the record but is not it. Spec §9
+asks for a digest with no synthesis and defers narrative drafting until there is
+real note history to design against, so nothing is missing from the MVP. It is
+in the backlog below with what it would cost.
+
+Cleanup: `decision_for` was a helper copied inside `tests/test_tag_provenance.py`
+and is now `tags.decision_for`, where the report needed it too.
+
+Part 4 is complete, and with it phase 6. Everything left before hardening needs
+the laptop and the key in it.
+
+### Backlog — wanted, not scheduled
+
+Raised while playtesting; recorded so they are not rediscovered later.
+
+- **Offline spelling and grammar help.** Wanted more once editing means a
+  permanent revision rather than a silent fix. Must not be the browser's, for
+  the reason above. The local model could do it, but that is a slow round trip
+  for a typo, so this needs thought rather than an obvious answer.
+- **Reprocessing on much weaker hardware.** Re-sorting every correction is a
+  deliberate trade: local inference is slow (deepseek-r1:14b measured at ~88 s a
+  note) and the machine's time is what it is for. Someone running this on a
+  laptop that struggles would want the choice, which means the policy wants to
+  stay in one obvious place rather than spread across the edit path.
+- **File ingest in the browser.** `counselog import` already exists in the CLI,
+  one file to one note, with `--third-party` setting `source_trust` so the
+  stronger sanitization of spec §10 can be applied later. The browser has no
+  equivalent. Note that spec §7 deliberately scoped sanitization to
+  self-authored text; a file arriving from elsewhere is the case that scoping
+  was deferring, so this is not purely an interface job.
+- **A polished digest.** A digest read aloud is a wall of raw notes. Having the
+  local model smooth it would need a report endpoint on the desktop, a prompt, a
+  schema-constrained response and the session handshake that hands over the DEK
+  — and then a page that makes unmistakably clear which words are the record's
+  and which are the model's, because the whole value of the digest is that it is
+  the former. Worth doing once there are enough notes to judge whether the raw
+  version is actually hard to read.
+- **Digests for the `self` and `team` bins.** Notes sort into three kinds of
+  bin, and only the per-person one has a page. §9 asks for exactly one report,
+  so this is scope rather than an oversight — `core/reports` already works on
+  any bin key, so it is a route and a heading when it is wanted.
 
 ## Phase 7 — PIV signing *(laptop)*
 

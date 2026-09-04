@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}{{ person.display_name }}'s notes · Counselog{% endblock %}
+{% block content %}
+
+  <h1>{{ person.display_name }}</h1>
+
+  <p class="aside">
+    Every note sorted to them, oldest first, exactly as written. Nothing here is
+    summarised or interpreted — this page has no opinion about the notes, and no
+    model has read them to make it.
+  </p>
+
+  {% if error %}
+    <p class="error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="get" action="{{ url_for('person_digest', person_id=person.id) }}">
+    {# A GET form: this reads and changes nothing, so the range you are looking
+       at stays in the address bar and can be bookmarked or sent to yourself. #}
+    <label for="since">From</label>
+    <input id="since" name="since" type="date" value="{{ typed.since }}"
+           placeholder="2026-03-01">
+
+    <label for="until">To</label>
+    <input id="until" name="until" type="date" value="{{ typed.until }}"
+           placeholder="2026-03-31">
+
+    <p class="aside">
+      Whole days, and both ends are included. Leave either empty for everything
+      up to or from the other.
+    </p>
+    <button type="submit">Show that range</button>
+  </form>
+
+  {% if digest %}
+    <h2>What this is built on</h2>
+    {% if digest.total %}
+      <p class="notice" role="status">
+        {{ digest.total }} note{{ "" if digest.total == 1 else "s" }}.
+        {% if digest.checked %}
+          {{ digest.checked }} you checked yourself.
+        {% endif %}
+        {% if digest.matched %}
+          {{ digest.matched }} matched one of their names exactly.
+        {% endif %}
+        {% if digest.guessed %}
+          <strong>{{ digest.guessed }} rest{{ "s" if digest.guessed == 1 else "" }}
+          on the model's judgment alone</strong> and
+          {{ "has" if digest.guessed == 1 else "have" }} not been checked by
+          anyone.
+        {% endif %}
+      </p>
+      <p class="aside">
+        Every note that was sorted here is below, including the unchecked ones.
+        Leaving those out would make this page look better checked than it is.
+        {% if digest.cleared %}
+          {{ digest.cleared }} of them had the text cleared and can only be
+          shown as having existed.
+        {% endif %}
+      </p>
+    {% endif %}
+
+    {% if digest.excerpts %}
+      {% for excerpt in digest.excerpts %}
+        <article class="excerpt">
+          <p class="when">
+            {{ excerpt.occurred_at | friendly_time }}
+            {% if excerpt.backdated %}
+              <span class="marker" title="recorded as happening earlier than it was written">backdated</span>
+            {% endif %}
+            {% if excerpt.edited %}<span class="marker">corrected</span>{% endif %}
+            {% if excerpt.cleared %}<span class="marker">cleared</span>{% endif %}
+            {% if excerpt.checked %}
+              <span class="marker">you checked this</span>
+            {% elif excerpt.decided_by == "alias" %}
+              <span class="marker">matched by name</span>
+            {% else %}
+              <span class="marker">the model's guess{% if excerpt.confidence %},
+                {{ (excerpt.confidence * 100) | round | int }}% sure{% endif %}</span>
+            {% endif %}
+          </p>
+          {% if excerpt.cleared %}
+            <p class="gone">The text was cleared. Its place in the record remains.</p>
+          {% else %}
+            <div class="note-text">{{ excerpt.text }}</div>
+          {% endif %}
+          <p class="aside">
+            <a class="quiet-link"
+               href="{{ url_for('note_detail', note_id=excerpt.note.id) }}">See this note</a>
+          </p>
+        </article>
+      {% endfor %}
+
+      <h2>What this page is not</h2>
+      <p>
+        It shows what was written down, not what happened. Spacing and bullet
+        marks are tidied so a run of notes reads as one document; the words are
+        exactly as written and can be checked against each note.
+        <a href="{{ url_for('verify_record') }}">Checking the record</a> shows
+        that none of them have been altered since.
+      </p>
+    {% else %}
+      <p>
+        {% if digest.since or digest.until %}
+          Nothing sorted to {{ person.display_name }} in that range.
+        {% else %}
+          Nothing sorted to {{ person.display_name }} yet. Notes reach this page
+          once sorting has run and put them in their bin.
+        {% endif %}
+      </p>
+    {% endif %}
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('reports_dashboard') }}">All reports</a> ·
+    <a href="{{ url_for('person_detail', person_id=person.id) }}">Their names and pronouns</a> ·
+    <a href="{{ url_for('note_list') }}">Your notes</a>
+  </p>
+
+{% endblock %}

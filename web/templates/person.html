@@ -66,6 +66,7 @@
   </form>
 
   <p class="aside">
+    <a href="{{ url_for('person_digest', person_id=person.id) }}">Their notes, as a digest</a> ·
     <a href="{{ url_for('people_list') }}">Everyone</a> ·
     <a href="{{ url_for('note_list') }}">Your notes</a>
   </p>

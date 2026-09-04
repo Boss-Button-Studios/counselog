@@ -36,11 +36,9 @@ def keys_in(conn, note_id):
     return sorted(key for key, _ in tags.tags_for_note(conn, note_id))
 
 
-def decision_for(conn, note_id, key):
-    for decision in tags.tag_decisions(conn, note_id):
-        if decision.key == key:
-            return decision
-    return None
+# `tags.decision_for` used to live here as a test helper. Reports needed the
+# same lookup, so it moved into the module it belongs to.
+decision_for = tags.decision_for
 
 
 # ── where a tag came from ────────────────────────────────────────────────────

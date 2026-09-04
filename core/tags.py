@@ -145,6 +145,19 @@ def tag_decisions(conn: "sqlcipher3.Connection", note_id: int) -> list[TagDecisi
     ]
 
 
+def decision_for(conn: "sqlcipher3.Connection", note_id: int,
+                 key: str) -> TagDecision | None:
+    """The one answer recorded about this note and this bin, if there is one.
+
+    A report needs the provenance of the tag that put a note in *its* bin, not
+    of every bin the note is in.
+    """
+    for decision in tag_decisions(conn, note_id):
+        if decision.key == key:
+            return decision
+    return None
+
+
 def carry_forward(conn: "sqlcipher3.Connection", from_note: int, to_note: int) -> None:
     """Copy every decision from a note to the correction that replaces it.
 
