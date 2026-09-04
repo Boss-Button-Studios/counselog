@@ -140,6 +140,13 @@ def judge_self_team(
       - the same note alone: {"self": true, confidence 0.9}
       - the same note sent straight after a different one: no bins at all
 
+    Measured again on 2026-09-04, which sharpens it: the failure is *position in
+    the run*, not simply "after the first". One note about the writer's own
+    conduct answered `self` at 0.95 as the first call; a second, different note
+    answered `team` at 0.85; the first note asked again, now third in the row,
+    returned no bins at all. Same text, same prompt, same seed, three different
+    positions, two different answers.
+
     So the answer depends on what was asked immediately before, even though
     every request here is stateless and carries its own complete prompt. The
     variation is in the runtime — a served model reuses cached state between

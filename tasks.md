@@ -866,6 +866,17 @@ Raised while playtesting; recorded so they are not rediscovered later.
   and which are the model's, because the whole value of the digest is that it is
   the former. Worth doing once there are enough notes to judge whether the raw
   version is actually hard to read.
+- **"No bin matched" cannot be told from "the model dropped it."** Sorting a
+  note asks the model one question, and a run of notes asks it repeatedly — but
+  the answer depends on the note's position in that run (measured 2026-09-04,
+  see `tagger.judge_self_team`). A note that scores `self` at 0.95 asked alone
+  returns nothing asked third. Today both outcomes print "no bin matched" and
+  write no tag, so a note silently missing from a digest looks exactly like a
+  note the model considered and declined. Worth trying, cheapest first: unload
+  between calls (`keep_alive: 0`), pace the run, or re-ask once when the answer
+  is empty — 90 s to be sure a note really has no bin is a fair price when the
+  alternative is a digest quietly missing it. The provenance work already
+  ensures a person's answer survives whatever this settles on.
 - **Digests for the `self` and `team` bins.** Notes sort into three kinds of
   bin, and only the per-person one has a page. §9 asks for exactly one report,
   so this is scope rather than an oversight — `core/reports` already works on
