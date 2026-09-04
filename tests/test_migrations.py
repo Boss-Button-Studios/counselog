@@ -35,6 +35,12 @@ def _rewind_to(path, version: int) -> None:
     """Turn a current database into what `version` would have left behind."""
     conn = _raw(path)
     try:
+        if version < 6:
+            conn.execute("DROP TRIGGER signatures_immutable")
+            conn.execute("DROP TRIGGER signatures_undeletable")
+            conn.execute("DROP TRIGGER signing_keys_immutable")
+            conn.execute("DROP TRIGGER signing_keys_undeletable")
+            conn.execute("DROP TABLE signing_keys")
         if version < 5:
             conn.execute("ALTER TABLE note_tags DROP COLUMN decided_by")
             conn.execute("ALTER TABLE note_tags DROP COLUMN decision")
@@ -140,6 +146,7 @@ def with_a_note(path):
     (2, "the quarantine"),
     (3, "the revision columns"),
     (4, "who decided a tag"),
+    (5, "somewhere to keep a signing key"),
 ])
 def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version,
                                                             missing):
@@ -152,7 +159,7 @@ def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version
         conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
 def test_the_notes_survive_the_migration(with_a_note, version):
     """The whole point. A migration that loses a note is worse than no tool.
 
@@ -206,6 +213,42 @@ def test_the_new_tables_work_after_a_migration_not_just_exist(with_a_note):
         intake.ensure_identity(conn, with_a_note.parent / "spool.pub")
         assert len(intake.private_key(conn)) == 32
         conn.execute("UPDATE people SET pronouns = 'they/them' WHERE 0")
+    finally:
+        conn.close()
+
+
+def test_a_record_can_be_signed_after_coming_forward(with_a_note):
+    """The migration that mattered for phase 7: a database written before
+    signing existed must be signable, and must then check its own signature —
+    a key store that exists but does not work would pass a name check."""
+    from core import signatures
+    from core.crypto.signing import SoftwareSigner
+
+    _rewind_to(with_a_note, 5)
+    conn = db.connect(with_a_note, KEY)
+    try:
+        recorded = signatures.sign_head(conn, SoftwareSigner.generate(), label="laptop")
+        assert signatures.verify_coverage(conn).ok
+        assert signatures.known_key(conn, recorded.pubkey_id) is not None
+    finally:
+        conn.close()
+
+
+def test_the_signature_tables_are_append_only_after_a_migration(with_a_note):
+    """The guards are created by the migration, not only by a fresh schema.
+    A record brought forward would otherwise be the one where evidence can be
+    quietly deleted."""
+    from core import signatures
+    from core.crypto.signing import SoftwareSigner
+
+    _rewind_to(with_a_note, 5)
+    conn = db.connect(with_a_note, KEY)
+    try:
+        signatures.sign_head(conn, SoftwareSigner.generate())
+        for statement in ("DELETE FROM signatures", "DELETE FROM signing_keys",
+                          "UPDATE signatures SET covers_seq = 99"):
+            with pytest.raises(sqlcipher3.DatabaseError):
+                conn.execute(statement)
     finally:
         conn.close()
 

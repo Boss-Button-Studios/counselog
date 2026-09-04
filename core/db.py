@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 class DatabaseError(Exception):
@@ -223,6 +223,34 @@ CREATE TABLE signatures (
     signature  BLOB NOT NULL,
     signed_at  TEXT NOT NULL
 );
+
+-- The public halves of the keys that have signed this record. A signature is
+-- worthless without the key that checks it, so the record carries its own: a
+-- copy of this database can be verified by someone who has nothing else.
+--
+-- The id is derived from the key itself (see crypto/signing.key_id), never
+-- assigned, so the same key is recognisable across machines without anyone
+-- having to keep a register.
+CREATE TABLE signing_keys (
+    id         TEXT PRIMARY KEY,
+    algorithm  TEXT NOT NULL,
+    public_key BLOB NOT NULL,
+    label      TEXT,
+    first_seen TEXT NOT NULL
+);
+
+-- Both tables are append-only, for the reason the chain is. Editing a signature
+-- would let someone re-point an attestation at a record it never covered, and
+-- deleting a key would leave its signatures unverifiable — destroying the
+-- evidence rather than the claim.
+CREATE TRIGGER signing_keys_immutable BEFORE UPDATE ON signing_keys
+BEGIN SELECT RAISE(ABORT, 'signing keys cannot be edited'); END;
+CREATE TRIGGER signing_keys_undeletable BEFORE DELETE ON signing_keys
+BEGIN SELECT RAISE(ABORT, 'signing keys cannot be deleted'); END;
+CREATE TRIGGER signatures_immutable BEFORE UPDATE ON signatures
+BEGIN SELECT RAISE(ABORT, 'signatures cannot be edited'); END;
+CREATE TRIGGER signatures_undeletable BEFORE DELETE ON signatures
+BEGIN SELECT RAISE(ABORT, 'signatures cannot be deleted'); END;
 """
 
 
@@ -231,6 +259,28 @@ CREATE TABLE signatures (
 # chain — altering a hashed field during a migration would make every note after
 # it look tampered with.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
+    6: (
+        # Phase 2 created `signatures` early so signing would need no migration.
+        # It missed this: a signature cannot be checked without the public key,
+        # and there was nowhere to keep one. Adding the table rather than
+        # putting the key in each signature row, because many signatures share
+        # one key and a record should be able to say "this key, again".
+        """CREATE TABLE signing_keys (
+               id         TEXT PRIMARY KEY,
+               algorithm  TEXT NOT NULL,
+               public_key BLOB NOT NULL,
+               label      TEXT,
+               first_seen TEXT NOT NULL
+           )""",
+        """CREATE TRIGGER signing_keys_immutable BEFORE UPDATE ON signing_keys
+           BEGIN SELECT RAISE(ABORT, 'signing keys cannot be edited'); END""",
+        """CREATE TRIGGER signing_keys_undeletable BEFORE DELETE ON signing_keys
+           BEGIN SELECT RAISE(ABORT, 'signing keys cannot be deleted'); END""",
+        """CREATE TRIGGER signatures_immutable BEFORE UPDATE ON signatures
+           BEGIN SELECT RAISE(ABORT, 'signatures cannot be edited'); END""",
+        """CREATE TRIGGER signatures_undeletable BEFORE DELETE ON signatures
+           BEGIN SELECT RAISE(ABORT, 'signatures cannot be deleted'); END""",
+    ),
     5: (
         "ALTER TABLE note_tags ADD COLUMN decided_by TEXT NOT NULL DEFAULT 'model'",
         "ALTER TABLE note_tags ADD COLUMN decision TEXT NOT NULL DEFAULT 'included'",

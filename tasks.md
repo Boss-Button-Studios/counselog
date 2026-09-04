@@ -920,9 +920,50 @@ be re-asked are the ones someone cared enough to fix.
 `tests/test_tagging.py` guards the ordering, because it reads like a style choice
 and reverting it reintroduces a bug that only shows from the second note onwards.
 
-## Phase 7 — PIV signing *(laptop)*
+## Phase 7 — PIV signing *(laptop)* 🟨
 
-`core/crypto/signing.py`.
+`core/crypto/signing.py`, `core/signatures.py`, schema version 6.
+
+### Part 1 — the signing core ✅ *(built on the desktop)*
+
+Built the way phase 1 was: a `Signer` protocol with `SoftwareSigner` holding a
+key in memory, so every line except the hardware custody is exercised by tests
+here. `PivSigner` is written from the documented API and is **unverified** until
+the laptop, exactly as `_hardware_responder` was through phase 1.
+
+**A signature covers three fields, not one.** The `entry_hash` alone would be a
+signature that could be lifted onto another position and claim to cover a
+different amount of the record, so `seq` is inside it. `signed_at` is inside too,
+which is the only thing that makes the recorded time worth reading — it cannot
+be edited afterwards without breaking the signature. All length-prefixed, and
+carrying a version, for the reasons the chain already does both.
+
+**Phase 2's `signatures` table was created early to avoid a migration, and still
+needed one.** A signature cannot be checked without the public key, and there
+was nowhere to put one. Schema version 6 adds `signing_keys`, so a copy of the
+database can be verified by someone holding nothing else. Both tables are
+append-only: editing a signature would re-point an attestation at a record it
+never covered, and deleting a key leaves its signatures unverifiable — which
+destroys the evidence rather than the claim.
+
+**Coverage is the thing a reader gets wrong.** A valid signature is not a signed
+record: it covers the chain as it stood when it was made, and every note since
+is vouched for by nobody. `verify_coverage` reports how far the newest *valid*
+signature reaches, and an invalid one covers nothing — counting it would be the
+same mistake as trusting it.
+
+The three failure kinds are kept apart because they mean different things: a
+signature over a position not in the chain is a broken record, one made by a key
+the record no longer holds is unverifiable rather than wrong, and one that does
+not match is the case everyone imagines and the rarest.
+
+Tested against the attack the chain alone cannot catch — rebuild the chain and
+it verifies clean, because it is internally consistent; the signature is what
+contradicts it. The tests drop the append-only triggers first, because someone
+holding the key can, which is why the triggers were never the real defence.
+
+Still to do: `counselog sign`, signature reporting in `verify` and on the web
+page, and the first real run on the laptop with a key in it.
 
 ### Laptop setup checklist
 
