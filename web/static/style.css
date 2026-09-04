@@ -223,7 +223,9 @@ ul.rows.notes a:hover, ul.rows.notes a:focus-visible {
    every other button. */
 .notice.danger { border-left-color: var(--error); background: color-mix(in srgb, var(--error) 8%, transparent); }
 button.destructive { background: var(--error); }
-a.cancel { margin-left: 1rem; }
+/* Never split across lines: "Show everything" beside a wide button broke
+   mid-phrase on a phone, reading as two separate links. */
+a.cancel { margin-left: 1rem; white-space: nowrap; }
 a.danger-link { color: var(--error); }
 
 /* The chain head, meant to be read character by character or copied whole. */
@@ -245,3 +247,18 @@ a.quiet-link { font-size: 0.9rem; white-space: nowrap; }
 .excerpt .when { margin: 0 0 0.45rem; }
 .excerpt .aside { margin: 0.45rem 0 0; }
 .excerpt .gone { font-style: italic; color: var(--muted); }
+
+/* The date range, folded away until wanted. A date field is nearly half a phone
+   screen wide on its own, so two of them plus a button buried the notes. */
+.range { margin: 0.5rem 0 1.4rem; }
+
+.range > summary {
+  /* A comfortable touch target, and obviously something to press. */
+  padding: 0.55rem 0.2rem;
+  color: var(--accent);
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.range > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.range[open] > summary { margin-bottom: 0.4rem; }

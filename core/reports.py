@@ -286,10 +286,23 @@ def _days_since(last_at: str | None, today: date) -> int | None:
 
 
 def unsorted_count(conn) -> int:
-    """Notes no digest can show yet, because nothing has put them in a bin.
+    """Notes no digest can show, because nothing has put them in a bin.
 
     Shown on the dashboard rather than left implicit. Without it the honest
     reading of an empty digest — "nothing has been sorted yet" — is
     indistinguishable from the alarming one, "nothing has been written".
+
+    Deliberately not `unprocessed_notes`, which was the first version of this
+    and was wrong in a way only a real record showed: a corrected note is queued
+    for sorting again *and* carries the original's bins forward, so it is
+    already on the digest it belongs to. Counting it here told the reader that a
+    note plainly visible on a person's page was in no digest at all. What the
+    sentence claims is "in no bin", so that is what it now counts.
     """
-    return len(models.unprocessed_notes(conn))
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM notes "
+        f"WHERE NOT {models.SUPERSEDED} AND NOT EXISTS ("
+        "  SELECT 1 FROM note_tags t WHERE t.note_id = notes.id "
+        f"  AND t.decision = '{tags.INCLUDED}')"
+    ).fetchone()
+    return int(row["n"])

@@ -249,6 +249,22 @@ def test_a_person_with_nothing_sorted_to_them_yet_is_told_why(client, record, de
     assert "Nothing sorted to Zed Q. yet" in page
 
 
+def test_an_empty_digest_does_not_head_a_summary_that_is_not_there(client, record, dek):
+    """Found by opening a real record where nothing had been sorted yet: the
+    heading rendered with nothing under it, announcing counts that did not
+    exist."""
+    conn = open_record(dek)
+    try:
+        zed = models.add_person(conn, "Zed Q.")
+    finally:
+        conn.close()
+
+    sign_in(client)
+    page = text_of(get(client, f"/reports/{zed.id}"))
+    assert "What this is built on" not in page
+    assert "Nothing sorted to Zed Q. yet" in page
+
+
 def test_an_unknown_person_gets_a_page_not_a_crash(client, record):
     sign_in(client)
     assert get(client, "/reports/999").status_code == 404
@@ -303,6 +319,30 @@ def test_a_refused_range_keeps_what_was_typed(client, record):
     sign_in(client)
     page = get(client, f"/reports/{record['person'].id}?since=2026-13-01").get_data(as_text=True)
     assert 'value="2026-13-01"' in page
+
+
+def test_the_range_form_is_folded_away_until_it_is_wanted(client, record):
+    """Found by looking at the page on a phone: two date fields and a button
+    pushed the notes themselves off the bottom of the screen."""
+    sign_in(client)
+    page = get(client, f"/reports/{record['person'].id}").get_data(as_text=True)
+    assert '<details class="range" >' in page or '<details class="range">' in page
+    assert "Narrow to a date range" in page
+
+
+def test_a_range_in_force_is_shown_open_and_named(client, record):
+    """Notes missing from a page must never be unexplained."""
+    sign_in(client)
+    page = get(client, f"/reports/{record['person'].id}"
+                       "?since=2026-03-01&until=2026-03-31").get_data(as_text=True)
+    assert '<details class="range" open>' in page
+    assert "Showing" in page and "2026-03-01" in page and "2026-03-31" in page
+
+
+def test_a_refused_range_leaves_the_form_open_to_be_corrected(client, record):
+    sign_in(client)
+    page = get(client, f"/reports/{record['person'].id}?since=nonsense").get_data(as_text=True)
+    assert '<details class="range" open>' in page
 
 
 def test_the_range_survives_in_the_address_so_it_can_be_kept(client, record):

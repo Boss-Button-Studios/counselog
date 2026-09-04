@@ -14,27 +14,51 @@
     <p class="error" role="alert">{{ error }}</p>
   {% endif %}
 
-  <form method="get" action="{{ url_for('person_digest', person_id=person.id) }}">
-    {# A GET form: this reads and changes nothing, so the range you are looking
-       at stays in the address bar and can be bookmarked or sent to yourself. #}
-    <label for="since">From</label>
-    <input id="since" name="since" type="date" value="{{ typed.since }}"
-           placeholder="2026-03-01">
+  {# Folded away by default: the notes are what this page is for, and a pair of
+     date fields at the top pushed them off a phone screen. Open whenever a
+     range is actually in force, so the reader can always see what is being
+     filtered rather than wondering why notes are missing. A <details> needs no
+     script, and stays keyboard- and screen-reader-operable. #}
+  <details class="range" {% if typed.since or typed.until or error %}open{% endif %}>
+    <summary>
+      {% if digest and (digest.since or digest.until) %}
+        Showing
+        {% if digest.since %}from {{ digest.since }}{% endif %}
+        {% if digest.until %}up to {{ digest.until }}{% endif %}
+      {% else %}
+        Narrow to a date range
+      {% endif %}
+    </summary>
 
-    <label for="until">To</label>
-    <input id="until" name="until" type="date" value="{{ typed.until }}"
-           placeholder="2026-03-31">
+    <form method="get" action="{{ url_for('person_digest', person_id=person.id) }}">
+      {# A GET form: this reads and changes nothing, so the range you are looking
+         at stays in the address bar and can be bookmarked or sent to yourself. #}
+      <label for="since">From</label>
+      <input id="since" name="since" type="date" value="{{ typed.since }}"
+             placeholder="2026-03-01">
 
-    <p class="aside">
-      Whole days, and both ends are included. Leave either empty for everything
-      up to or from the other.
-    </p>
-    <button type="submit">Show that range</button>
-  </form>
+      <label for="until">To</label>
+      <input id="until" name="until" type="date" value="{{ typed.until }}"
+             placeholder="2026-03-31">
+
+      <p class="aside">
+        Whole days, and both ends are included. Leave either empty for everything
+        up to or from the other.
+      </p>
+      <button type="submit">Show that range</button>
+      {% if typed.since or typed.until %}
+        <a class="cancel" href="{{ url_for('person_digest', person_id=person.id) }}">Show
+          everything</a>
+      {% endif %}
+    </form>
+  </details>
 
   {% if digest %}
-    <h2>What this is built on</h2>
     {% if digest.total %}
+      {# The heading belongs to the counts, not to the page: with no notes under
+         it, it announced a summary that was not there. Found by looking at a
+         real record where nothing had been sorted yet. #}
+      <h2>What this is built on</h2>
       <p class="notice" role="status">
         {{ digest.total }} note{{ "" if digest.total == 1 else "s" }}.
         {% if digest.checked %}

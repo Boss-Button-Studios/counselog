@@ -25,7 +25,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
-| Phase 6 — The browser interface | ✅ Complete (559 tests, 91% cov) | desktop |
+| Phase 6 — The browser interface | ✅ Complete (567 tests, 91% cov) | desktop |
 | Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
 | Phase 8 — Harden + docs | ⬜ Not started | both |
 
@@ -798,6 +798,41 @@ handshake, all to produce text that reads like the record but is not it. Spec §
 asks for a digest with no synthesis and defers narrative drafting until there is
 real note history to design against, so nothing is missing from the MVP. It is
 in the backlog below with what it would cost.
+
+**Found by playtesting, not by the tests.** Four faults, none of which any test
+was going to catch, because each needed either a real record or a real screen.
+
+The record they were built against had every note *unsorted* — three notes,
+edited, so all three were queued for re-sorting and none was in a bin. That is
+the state the tests never posed, and it broke two things at once:
+
+  - The digest rendered **"What this is built on" with nothing under it**, a
+    heading announcing a summary that did not exist. The `<h2>` sat outside the
+    check for whether there were any counts.
+  - The dashboard said **"1 note has not been sorted, so it is in none of these
+    digests" about a note that was plainly on a digest page**. `unsorted_count`
+    was `unprocessed_notes`, and a corrected note is queued for sorting again
+    *and* carries the original's bins forward. The sentence claims "in no bin",
+    so it now counts notes with no included tag — the thing it actually says.
+    This one is the worst of the four: a page confidently telling the reader
+    something false about its own completeness.
+
+The other two came from looking at the page at phone width, which is where it
+will mostly be read:
+
+  - Two full-width date fields and a button **buried the notes below the fold**.
+    Side by side was tried first and does not work — a native date field is
+    nearly half a phone screen wide on its own — so the range is now a
+    `<details>`, folded away, and opened whenever a range is in force or a date
+    was refused. Folded, its summary names the range being shown, so notes are
+    never missing without the page saying why. No script, and still keyboard
+    and screen-reader operable.
+  - **"Show everything" split across two lines**, reading as two separate
+    links. `a.cancel` no longer wraps.
+
+Method, for the next time: the real record for the empty states, and a seeded
+fictitious one under `COUNSELOG_HOME` for the populated ones, driven with curl
+and screenshotted headless at 390px. The real record was never written to.
 
 Cleanup: `decision_for` was a helper copied inside `tests/test_tag_provenance.py`
 and is now `tags.decision_for`, where the report needed it too.

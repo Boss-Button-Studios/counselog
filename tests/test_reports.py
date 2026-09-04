@@ -166,6 +166,27 @@ def test_an_unsorted_note_is_in_nobody_s_digest(conn, ada):
 # ── what the digest stands on ────────────────────────────────────────────────
 
 
+def test_a_corrected_note_is_not_counted_as_being_in_no_bin(conn, ada):
+    """Found by playtesting a real record. A correction queues for sorting again
+    *and* carries the original's bins forward, so it is already on the digest.
+    Counting it as unsorted told the reader a note they could see was missing."""
+    from core import revisions
+
+    original = note_about(conn, ada, "first attempt")
+    revisions.revise(conn, original.id, "second attempt")
+
+    assert reports.digest(conn, ada.id).total == 1
+    assert reports.unsorted_count(conn) == 0
+
+
+def test_a_note_a_person_excluded_everywhere_counts_as_being_in_no_bin(conn, ada):
+    """A rejection is an answer, not a tag: the note is in no digest."""
+    note = note_about(conn, ada, "not about Ada", confidence=0.4)
+    tags.reject_tag(conn, note.id, f"person:{ada.id}")
+
+    assert reports.unsorted_count(conn) == 1
+
+
 def test_the_three_kinds_of_answer_are_counted_apart(conn, ada):
     """Checked, matched by name and guessed are not the same fact."""
     note_about(conn, ada, "name was in the text", confidence=None)
