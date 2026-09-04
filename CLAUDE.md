@@ -145,3 +145,8 @@ key, and because `pyscard` has no Linux wheels — it needs `swig` and
 - Sanitize note text (`core/sanitize.py`) at ingestion, *before* hashing it into
   the chain, and again before any LLM call.
 - Never hard-delete a note; tombstone it. Hard deletes break the hash chain.
+- `bench/` measures this code against a real model or a real record. It is not
+  tests, `pytest` never collects it, and it is not installed. Anything that
+  takes minutes, needs Ollama, or seeds a fictitious record belongs there —
+  scripts that measured something and were then thrown away are why the
+  directory exists.

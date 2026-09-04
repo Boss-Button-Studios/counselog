@@ -962,6 +962,23 @@ typing. `verify` gains signature checking.
 
 `SECURITY.md`, real two-machine run, docs pass.
 
+**Packaging, done early because it was broken.** `pyproject.toml` declared
+`laptop.web` — an empty phase 0 scaffold, now removed — and never declared
+`web`, so `pip install .` shipped no browser interface at all. It only ever
+worked from a checkout because `./counselogweb` puts the repo on `PYTHONPATH`.
+Fixed, along with the package data: templates and the stylesheet are not
+importable modules, so without `package-data` an install imports cleanly and
+then fails on every page. Verified by building a wheel, installing it somewhere
+else, and rendering a template out of it — not by reading the manifest.
+
+**`bench/` holds what measures the code against a real model or record.** Not
+tests: they take minutes and need Ollama, so `testpaths` excludes them and they
+are not installed. It exists because the scripts that chose the prompt ordering
+lived in a temp directory and were lost, leaving numbers in a docstring nobody
+could re-derive. `bench/seed_record.py` refuses to write into the real record —
+a script that fabricates notes must never be able to fabricate them where the
+record is meant to be evidence.
+
 `SECURITY.md` must state plainly what the chain and signature do **not** prove:
 the chain shows the record is unaltered, the signature shows who held the key,
 neither shows the note is *true*, and neither shows *when* the content was

@@ -62,7 +62,20 @@ dev = [
 counselog = "laptop.cli:cli"
 
 [tool.setuptools]
-packages = ["core", "core.crypto", "laptop", "laptop.web", "desktop"]
+# `web` is the browser interface — phases 5 and 6 — and was missing here, so an
+# installed copy shipped no interface at all. It worked from a checkout only
+# because the ./counselogweb wrapper puts the repo on PYTHONPATH. `laptop.web`
+# was declared and does not exist: an empty scaffold from phase 0, removed.
+#
+# `bench` is deliberately absent. It measures this code against a real model and
+# is for developing Counselog, not for running it.
+packages = ["core", "core.crypto", "laptop", "desktop", "web", "web.views"]
+
+# Templates and stylesheet are not importable modules, so setuptools does not
+# take them along on its own — and an install without them imports cleanly and
+# then fails on every page, which is the worst of both.
+[tool.setuptools.package-data]
+web = ["templates/*.html", "static/*.js", "static/*.css"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
