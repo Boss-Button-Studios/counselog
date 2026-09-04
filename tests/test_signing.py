@@ -231,3 +231,89 @@ def test_a_signature_never_claims_the_notes_are_true(conn, written, signer):
 
     assert "does not prove" in signing.__doc__.lower()
     assert "true" in signing.__doc__.lower()
+
+
+# ── the commands and the page ────────────────────────────────────────────────
+
+
+def test_signing_needs_the_key_and_says_so_when_it_is_absent(tmp_path, monkeypatch):
+    """There is no software fallback, on purpose: a signing key kept on disk
+    could be used by anyone who can already open the database, so a signature
+    made with one would prove nothing the reader did not already have."""
+    from click.testing import CliRunner
+    from laptop.cli import cli
+
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("COUNSELOG_ENV_FILE", str(tmp_path / "absent.env"))
+    runner = CliRunner()
+    runner.invoke(cli, ["keys", "init", "--factor", "password", "--label", "t"],
+                  input="pw\npw\n", catch_exceptions=False)
+    runner.invoke(cli, ["init", "--unlock-with", "password"], input="pw\n",
+                  catch_exceptions=False)
+    runner.invoke(cli, ["note", "-m", "something", "--unlock-with", "password"],
+                  input="pw\n", catch_exceptions=False)
+
+    from core.crypto import SignerUnavailable
+    import laptop.sign_cli as sign_cli
+
+    def no_key(pin):
+        raise SignerUnavailable("No YubiKey found. Plug one in and try again.")
+
+    monkeypatch.setattr(sign_cli, "build_signer", no_key)
+    result = runner.invoke(cli, ["sign", "--unlock-with", "password"], input="pw\n1234\n")
+
+    assert result.exit_code != 0
+    assert "Plug one in" in result.output
+
+
+def test_signing_from_the_command_line_records_and_reports_it(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from laptop.cli import cli
+    import laptop.sign_cli as sign_cli
+
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("COUNSELOG_ENV_FILE", str(tmp_path / "absent.env"))
+    runner = CliRunner()
+    runner.invoke(cli, ["keys", "init", "--factor", "password", "--label", "t"],
+                  input="pw\npw\n", catch_exceptions=False)
+    runner.invoke(cli, ["init", "--unlock-with", "password"], input="pw\n",
+                  catch_exceptions=False)
+    runner.invoke(cli, ["note", "-m", "something", "--unlock-with", "password"],
+                  input="pw\n", catch_exceptions=False)
+
+    monkeypatch.setattr(sign_cli, "build_signer", lambda pin: SoftwareSigner.generate())
+    signed = runner.invoke(cli, ["sign", "--unlock-with", "password"], input="pw\n1234\n")
+    assert signed.exit_code == 0, signed.output
+    assert "Signed 1 entry" in signed.output
+    # The limit is stated every time, next to the reassuring part.
+    assert "does not" in signed.output
+
+    checked = runner.invoke(cli, ["verify", "--unlock-with", "password"], input="pw\n")
+    assert checked.exit_code == 0, checked.output
+    assert "Signed up to entry 1 of 1" in checked.output
+
+    # A note written after the signature must be reported as covered by nobody.
+    runner.invoke(cli, ["note", "-m", "written after", "--unlock-with", "password"],
+                  input="pw\n", catch_exceptions=False)
+    after = runner.invoke(cli, ["verify", "--unlock-with", "password"], input="pw\n")
+    assert "vouched for by nobody" in after.output
+
+
+def test_verify_says_plainly_when_nothing_has_been_signed(tmp_path, monkeypatch):
+    """A clean chain nobody signed must not read as fully checked."""
+    from click.testing import CliRunner
+    from laptop.cli import cli
+
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("COUNSELOG_ENV_FILE", str(tmp_path / "absent.env"))
+    runner = CliRunner()
+    runner.invoke(cli, ["keys", "init", "--factor", "password", "--label", "t"],
+                  input="pw\npw\n", catch_exceptions=False)
+    runner.invoke(cli, ["init", "--unlock-with", "password"], input="pw\n",
+                  catch_exceptions=False)
+    runner.invoke(cli, ["note", "-m", "something", "--unlock-with", "password"],
+                  input="pw\n", catch_exceptions=False)
+
+    result = runner.invoke(cli, ["verify", "--unlock-with", "password"], input="pw\n")
+    assert "Not signed" in result.output
+    assert "who recorded it" in result.output

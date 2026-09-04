@@ -49,12 +49,51 @@
   {% endif %}
 
   {% if result.checked %}
+    <h2>Who vouched for this</h2>
+    {% if not coverage.checks %}
+      <p class="aside">
+        Nothing has been signed. The record shows it has not been altered, which
+        is not the same as showing who recorded it — anyone able to open this
+        database could have rebuilt the whole chain, and it would still look
+        exactly this clean. Signing is what makes that impossible to do quietly.
+      </p>
+    {% else %}
+      {% for check in coverage.checks if not check.valid %}
+        <p class="error" role="alert">
+          A signature made {{ check.signature.signed_at | friendly_time }}
+          {{ check.reason }}.
+        </p>
+      {% endfor %}
+
+      {% if coverage.covered_seq %}
+        <p class="{{ 'notice' if coverage.ok else 'aside' }}"
+           {% if coverage.ok %}role="status"{% endif %}>
+          Signed up to entry {{ coverage.covered_seq }} of {{ coverage.head_seq }},
+          by {{ coverage.checks | selectattr("valid") | map(attribute="signature.pubkey_id") | unique | list | length }}
+          key{{ "" if coverage.checks | selectattr("valid") | map(attribute="signature.pubkey_id") | unique | list | length == 1 else "s" }}.
+        </p>
+      {% endif %}
+
+      {% if coverage.uncovered %}
+        <p class="aside">
+          {{ coverage.uncovered }}
+          entr{{ "y is" if coverage.uncovered == 1 else "ies are" }} newer than
+          the last signature, so {{ "it is" if coverage.uncovered == 1 else "they are" }}
+          vouched for by nobody yet. Sign again from the machine holding the key.
+        </p>
+      {% endif %}
+    {% endif %}
+
     <h2>What this does and does not show</h2>
     <p>
       It shows the notes have not been changed since they were written. It does
       <strong>not</strong> show that what they say is true, and it does not show
       exactly when the events in them happened — only the order in which they
       were written down.
+      {% if coverage.covered_seq %}
+        A signature adds one thing to that and no more: that whoever held the
+        key stood behind the record at the moment they signed it.
+      {% endif %}
     </p>
 
     {% if head %}

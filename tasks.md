@@ -962,8 +962,35 @@ it verifies clean, because it is internally consistent; the signature is what
 contradicts it. The tests drop the append-only triggers first, because someone
 holding the key can, which is why the triggers were never the real defence.
 
-Still to do: `counselog sign`, signature reporting in `verify` and on the web
-page, and the first real run on the laptop with a key in it.
+### Part 2 — signing, and saying what is covered ✅ *(hardware still unrun)*
+
+`laptop/sign_cli.py`, `verify` in both interfaces.
+
+**`counselog sign` offers no software alternative, and that is the feature.** A
+signing key kept on disk could be used by anyone who can already open the
+database, so a signature made with one proves nothing the reader did not already
+have — a reassuring row that means nothing is worse than no row. The signer is
+built through `build_signer` so tests can substitute one, the same injection
+phase 1 used for factors; it is what lets everything but the custody be
+exercised on a machine with no key.
+
+**`verify` now answers two questions, always together.** Whether the record was
+altered, and who stood behind it. A clean chain nobody has signed is a record
+with no author, and reporting only the first half is exactly how that comes to
+be read as fully checked. The unsigned case says so in words rather than by
+omitting a section.
+
+Both interfaces state the limit in the same sentence, word for word: a signature
+says whoever held the key stood behind the record at that moment, and nothing
+else. Two interfaces describing one guarantee differently is how a reader ends
+up believing whichever version claimed more.
+
+### Still to do — needs the laptop
+
+`PivSigner` has never touched hardware. Before it is trusted: the setup
+checklist below, `ykman piv keys generate 9c`, a certificate in the slot for
+`get_certificate` to return, then `counselog sign` for real. Everything else in
+phase 7 is built and tested.
 
 ### Laptop setup checklist
 

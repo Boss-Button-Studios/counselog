@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from flask import g, render_template
 
-from core import models
+from core import models, signatures
 from web.access import open_database, requires_unlock
 
 
@@ -37,6 +37,11 @@ def register(app) -> None:
                 problems=[_describe(problem) for problem in result.breaks],
                 head=head.entry_hash if head else None,
                 covered=head.seq if head else 0,
+                # The second question, always asked alongside the first: not
+                # "was this altered" but "who stood behind it". A clean chain
+                # nobody has signed is a record with no author, and answering
+                # only the first half lets that read as fully checked.
+                coverage=signatures.verify_coverage(conn),
             )
         finally:
             conn.close()

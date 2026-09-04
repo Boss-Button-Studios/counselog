@@ -225,3 +225,68 @@ def test_the_page_agrees_with_the_command_line(client, written, dek):
     page = verify_page(client)
     assert result.ok
     assert f"All {result.checked} notes are unaltered" in page
+
+
+# ── who vouched for it (phase 7) ─────────────────────────────────────────────
+
+
+def test_an_unsigned_record_is_not_presented_as_fully_checked(client, written):
+    """The page must not let "unaltered" be read as "and we know who wrote it"."""
+    sign_in(client)
+    page = verify_page(client)
+    assert "Nothing has been signed" in page
+    assert "not the same as showing who recorded it" in page
+
+
+def test_a_signed_record_says_how_far_the_signature_reaches(client, written, dek):
+    from core import db, signatures
+    from core.crypto import SoftwareSigner
+    from core.paths import notes_db_path
+
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        signatures.sign_head(conn, SoftwareSigner.generate(), label="laptop")
+    finally:
+        conn.close()
+
+    sign_in(client)
+    page = verify_page(client)
+    assert "Signed up to entry 2 of 2" in page
+
+
+def test_notes_written_after_the_signature_are_called_out(client, written, dek):
+    """The mistake worth preventing: reading "signed" as "all of it"."""
+    from core import db, models, signatures
+    from core.crypto import SoftwareSigner
+    from core.paths import notes_db_path
+
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        signatures.sign_head(conn, SoftwareSigner.generate())
+        models.add_note(conn, "written after the signature")
+    finally:
+        conn.close()
+
+    sign_in(client)
+    page = verify_page(client)
+    assert "Signed up to entry 2 of 3" in page
+    assert "vouched for by nobody yet" in page
+
+
+def test_a_signature_that_no_longer_matches_is_reported(client, written, dek):
+    from core import db, signatures
+    from core.crypto import SoftwareSigner
+    from core.paths import notes_db_path
+
+    conn = db.connect(notes_db_path(), dek)
+    try:
+        signatures.sign_head(conn, SoftwareSigner.generate())
+        conn.execute("DROP TRIGGER chain_is_append_only_update")
+        conn.execute("UPDATE note_chain SET entry_hash = ? WHERE seq = 2", ("f" * 64,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    sign_in(client)
+    page = verify_page(client)
+    assert "does not match the record it claims to cover" in page

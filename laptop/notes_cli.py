@@ -16,6 +16,7 @@ from core import db, intake, models
 from core.display import friendly_time as _friendly, preview as _preview
 from core.paths import notes_db_path
 from core.sanitize import describe_changes, sanitize
+from laptop.sign_cli import report as sign_report
 from laptop.unlock import FACTOR_CHOICES, load_keyring, open_database, unlock_dek
 
 MAX_IMPORT_BYTES = 1_000_000  # a note is prose, not a data dump
@@ -154,30 +155,46 @@ def verify(unlock_with: str | None) -> None:
     conn = open_database(unlock_with)
     try:
         result = models.verify(conn)
+
+        if result.checked == 0:
+            click.echo("No notes yet — nothing to check.")
+            return
+
+        if result.ok:
+            click.secho(f"All {result.checked} notes are unaltered since they were written.",
+                        fg="green")
+            if result.tombstoned:
+                click.echo(f"{result.tombstoned} note(s) had their text cleared. The record "
+                           "around them is intact, but their text can no longer be checked.")
+        else:
+            click.secho(f"Problems found in {len(result.breaks)} place(s):",
+                        fg="red", bold=True)
+            for problem in result.breaks:
+                where = f"note {problem.note_id}" if problem.seq == 0 else \
+                        f"position {problem.seq} (note {problem.note_id})"
+                click.echo(f"  {where}: {problem.reason}")
+
+        # Two different questions, always answered together: whether the record
+        # was altered, and who vouched for it. A clean chain with no signature
+        # is a record nobody has stood behind, and saying only the first half
+        # would let that read as fully checked.
+        click.echo()
+        coverage = sign_report(conn)
     finally:
         conn.close()
 
-    if result.checked == 0:
-        click.echo("No notes yet — nothing to check.")
-        return
+    click.echo()
+    click.echo("This shows the notes have not been changed. It does not show that")
+    click.echo("what they say is true, or exactly when the events happened.")
+    if coverage.signed:
+        # The same sentence the web page uses, deliberately word for word: two
+        # interfaces describing one guarantee differently is how a reader ends
+        # up believing whichever version claimed more.
+        click.echo("A signature adds one thing to that and no more: that whoever held")
+        click.echo("the key stood behind the record at the moment they signed it.")
 
-    if result.ok:
-        click.secho(f"All {result.checked} notes are unaltered since they were written.",
-                    fg="green")
-        if result.tombstoned:
-            click.echo(f"{result.tombstoned} note(s) had their text cleared. The record "
-                       "around them is intact, but their text can no longer be checked.")
-        click.echo()
-        click.echo("This shows the notes have not been changed. It does not show that")
-        click.echo("what they say is true, or exactly when the events happened.")
-        return
-
-    click.secho(f"Problems found in {len(result.breaks)} place(s):", fg="red", bold=True)
-    for problem in result.breaks:
-        where = f"note {problem.note_id}" if problem.seq == 0 else \
-                f"position {problem.seq} (note {problem.note_id})"
-        click.echo(f"  {where}: {problem.reason}")
-    raise SystemExit(1)
+    if not result.ok or any(not check.valid for check in coverage.checks):
+        raise SystemExit(1)
 
 
 @click.command("forget")
