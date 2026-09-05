@@ -1069,9 +1069,34 @@ on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
 
-## Phase 8 — Harden + docs
+## Phase 8 — Harden + docs 🟨
 
-`SECURITY.md`, real two-machine run, docs pass.
+Real two-machine run, docs pass. `SECURITY.md` ✅.
+
+### `SECURITY.md` ✅
+
+Written, and written from the code rather than from memory — every parameter in
+it was read out of the source while writing, because a threat model that is
+plausible and wrong is worse than none. `CLAUDE.md` has told every contributor
+to read this file since phase 0; until now it did not exist.
+
+`tests/test_security_doc.py` keeps the numbers true. Scrypt parameters, session
+timeouts, sign-in limits, the device secret size and the signature algorithm are
+asserted against the code, so a constant that moves fails the suite instead of
+quietly making the document a lie. It also asserts the claims that must never
+disappear — what the chain and the signature do *not* prove, and the four gaps
+in §8 — because those are the sentences a later tidy-up would remove first.
+
+**One overstatement caught while writing it.** The draft said identity is trusted
+only from loopback with the proxy's headers, implying that stops a local process.
+It does not, and `web/identity.py` says so in its own comment: nothing at that
+layer can tell a forged header from a real one, which is exactly why the
+passphrase is the control. Corrected, and a test now fails if that claim comes
+back.
+
+**The README was promising slightly more than is true.** "Plain text exists only
+in memory" is not true of the service log, where a traceback can carry a note
+fragment to disk. Squared with §6 rather than left as a nicer sentence.
 
 **Packaging, done early because it was broken.** `pyproject.toml` declared
 `laptop.web` — an empty phase 0 scaffold, now removed — and never declared
