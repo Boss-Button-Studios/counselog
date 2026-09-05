@@ -3,5 +3,29 @@
 {% block content %}
   <h1>{{ title }}</h1>
   <p>{{ message }}</p>
+
+  {# Only failures carry a reference. It is not a secret — it names a line in a
+     log, it does not grant anything — and it is the one thing that turns "it
+     broke" into something somebody can act on. #}
+  {% if reference %}
+    <p class="mono fingerprint">{{ reference }}</p>
+    <p class="aside">
+      {% if recorded %}
+        Written down under that reference, along with when it happened and which
+        page you were on. <a href="{{ url_for('problem_list') }}">Recent
+        problems</a> lists them.
+      {% else %}
+        The notes were locked, so this could not be written down — it is in the
+        service log under that reference and nowhere else. Quote it if you ask
+        anyone about this.
+      {% endif %}
+    </p>
+    <p class="aside">
+      What went wrong is deliberately not shown here. The message can carry a
+      file path or a piece of a note, and neither belongs on a page or in a log
+      that the encryption does not cover.
+    </p>
+  {% endif %}
+
   <p><a href="{{ url_for('home') }}">Back</a></p>
 {% endblock %}

@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class DatabaseError(Exception):
@@ -251,6 +251,24 @@ CREATE TRIGGER signatures_immutable BEFORE UPDATE ON signatures
 BEGIN SELECT RAISE(ABORT, 'signatures cannot be edited'); END;
 CREATE TRIGGER signatures_undeletable BEFORE DELETE ON signatures
 BEGIN SELECT RAISE(ABORT, 'signatures cannot be deleted'); END;
+
+-- Problems worth showing the person using this, without showing them a log.
+--
+-- What is deliberately NOT here: the message, the traceback, the path with its
+-- query string. Those can carry note text or a filesystem path, and the whole
+-- reason the 500 page never echoes an internal message is that it might. The
+-- `reference` is the join: it is printed on the error page and written beside
+-- the traceback in the service log, so a person can quote it and someone who
+-- can read the log can find it.
+--
+-- Same shape as spool_quarantine, and for the same reason: evidence a person
+-- should see, recorded on purpose, with the sensitive half left out.
+CREATE TABLE problems (
+    reference   TEXT PRIMARY KEY,   -- short, quotable, matches the log line
+    occurred_at TEXT NOT NULL,
+    endpoint    TEXT,               -- our own route name, never the raw path
+    kind        TEXT NOT NULL       -- the exception's class name, never its message
+);
 """
 
 
@@ -259,6 +277,14 @@ BEGIN SELECT RAISE(ABORT, 'signatures cannot be deleted'); END;
 # chain — altering a hashed field during a migration would make every note after
 # it look tampered with.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
+    7: (
+        """CREATE TABLE problems (
+               reference   TEXT PRIMARY KEY,
+               occurred_at TEXT NOT NULL,
+               endpoint    TEXT,
+               kind        TEXT NOT NULL
+           )""",
+    ),
     6: (
         # Phase 2 created `signatures` early so signing would need no migration.
         # It missed this: a signature cannot be checked without the public key,

@@ -920,6 +920,49 @@ be re-asked are the ones someone cared enough to fix.
 `tests/test_tagging.py` guards the ordering, because it reads like a style choice
 and reverting it reintroduces a bug that only shows from the second note onwards.
 
+### Found in use: "the details are in the service log" ✅ *(schema version 7)*
+
+`core/problems.py`, `web/views/problems.py`, `problems.html`, schema version 7.
+
+The 500 page said to check the service log. For the person this is built for
+that is a dead end — they do not know where the log is, and should not have to
+read a traceback to learn a page broke. But the traceback cannot go to them
+either: an exception message can carry a file path or a piece of a note, and
+note text does not belong anywhere the encryption does not reach.
+
+**A log tab was the obvious answer and is the wrong one.** The log is the one
+thing outside the encryption boundary — everything else the browser shows comes
+out of SQLCipher. Rendering it would also undo, one click later, the existing
+decision that the 500 page never echoes an internal message. So the two halves
+are split instead:
+
+  - a **reference** on the error page, written beside the traceback in the log:
+    quotable by someone who cannot read the log, findable by someone who can;
+  - a **record** in the encrypted database of when, which page, and the
+    exception's class name — never the message, the traceback, or the path with
+    its query string. Same shape as `spool_quarantine`, and the same reasoning.
+
+Recording is best effort and cannot make things worse: if the notes are locked
+the page says so and points at the log, and a failure inside the handler is
+caught, because an error handler that raises leaves the browser with no page at
+all. Old problems are dropped past 200 so a crash loop cannot grow the database.
+
+**A defect in the first version of this, found by breaking a page and reading
+the log rather than by a test.** The reference was logged against Flask's
+`InternalServerError` wrapper, whose traceback stops inside Flask's own dispatch
+— so the reference named a line that could not answer the question it exists to
+answer, while the real traceback sat in a separate entry with no reference on
+it. Now logged against the original exception, and a test checks the line
+carrying the reference also carries the fault.
+
+**What caused the report in the first place is worth recording too.** The
+service had been running since before phase 7, so it held the old Python while
+Jinja loaded the *new* template from disk on first render — the template asked
+for a `coverage` variable the old view never passed. Editing templates under a
+running service is enough to break it. The 500 was the right behaviour: had
+Jinja rendered the missing variable as empty, the page would have quietly
+dropped its "who vouched for this" section and looked fully checked.
+
 ## Phase 7 — PIV signing *(laptop)* 🟨
 
 `core/crypto/signing.py`, `core/signatures.py`, schema version 6.

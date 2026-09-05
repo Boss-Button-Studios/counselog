@@ -18,6 +18,7 @@ import secrets
 
 from flask import Flask, abort, g, render_template, request, session as cookie
 
+from core import problems
 from core.display import friendly_time, preview
 from web.access import CSRF_FIELD, sessions_of
 from web.identity import identify
@@ -156,7 +157,53 @@ def _register_errors(app: Flask) -> None:
 
     @app.errorhandler(500)
     def server_error(exc):
-        app.logger.exception("unhandled error", exc_info=exc)
-        # Never echo an internal message: it could carry a path or note text.
-        return render_template("error.html", title="Something went wrong",
-                               message="The details are in the service log."), 500
+        """Say enough to be actionable, and never echo an internal message.
+
+        A traceback or an exception message can carry a filesystem path or a
+        fragment of a note, so none of it reaches the browser. What does is a
+        reference, written beside the traceback in the log and recorded in the
+        encrypted database — quotable by someone who cannot read the log,
+        findable by someone who can.
+        """
+        reference = problems.new_reference()
+        # Log the *original* exception, not Flask's InternalServerError wrapper.
+        # The wrapper's traceback stops at Flask's own dispatch and says nothing
+        # about what failed — so the reference would name a line that cannot
+        # answer the question it exists to answer.
+        original = getattr(exc, "original_exception", None) or exc
+        app.logger.error("unhandled error [%s]", reference, exc_info=original)
+        recorded = _record_problem(app, reference, exc)
+        return render_template(
+            "error.html", title="Something went wrong",
+            message="Nothing was lost. The details are written down, "
+                    "under the reference below.",
+            reference=reference, recorded=recorded), 500
+
+
+def _record_problem(app: Flask, reference: str, exc) -> bool:
+    """Write the problem down if the notes are open. Never make things worse.
+
+    Best effort on purpose. The database may be locked, or may itself be what
+    failed, and an error handler that raises leaves the browser with no page at
+    all — the one outcome worse than the error being reported.
+    """
+    from web.access import open_database
+
+    # Flask hands the handler an InternalServerError wrapping what actually
+    # failed. The wrapper's name says nothing; the original's says which kind of
+    # fault it was, which is the whole value of recording it.
+    original = getattr(exc, "original_exception", None) or exc
+
+    try:
+        conn = open_database()
+    except Exception:  # locked, missing, or unreadable: the log still has it
+        return False
+    try:
+        problems.record(conn, reference, endpoint=request.endpoint,
+                        kind=type(original).__name__)
+        return True
+    except Exception:
+        app.logger.warning("could not record problem %s", reference, exc_info=True)
+        return False
+    finally:
+        conn.close()

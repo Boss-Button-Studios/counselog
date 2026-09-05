@@ -35,6 +35,8 @@ def _rewind_to(path, version: int) -> None:
     """Turn a current database into what `version` would have left behind."""
     conn = _raw(path)
     try:
+        if version < 7:
+            conn.execute("DROP TABLE problems")
         if version < 6:
             conn.execute("DROP TRIGGER signatures_immutable")
             conn.execute("DROP TRIGGER signatures_undeletable")
@@ -147,6 +149,7 @@ def with_a_note(path):
     (3, "the revision columns"),
     (4, "who decided a tag"),
     (5, "somewhere to keep a signing key"),
+    (6, "somewhere to note what went wrong"),
 ])
 def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version,
                                                             missing):
@@ -159,7 +162,7 @@ def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version
         conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
 def test_the_notes_survive_the_migration(with_a_note, version):
     """The whole point. A migration that loses a note is worse than no tool.
 
@@ -249,6 +252,20 @@ def test_the_signature_tables_are_append_only_after_a_migration(with_a_note):
                           "UPDATE signatures SET covers_seq = 99"):
             with pytest.raises(sqlcipher3.DatabaseError):
                 conn.execute(statement)
+    finally:
+        conn.close()
+
+
+def test_problems_can_be_recorded_after_coming_forward(with_a_note):
+    """A table that exists but does not work passes a name check and fails the
+    first time something goes wrong — which is the worst moment to find out."""
+    from core import problems
+
+    _rewind_to(with_a_note, 6)
+    conn = db.connect(with_a_note, KEY)
+    try:
+        problems.record(conn, "abc123", endpoint="verify_record", kind="RuntimeError")
+        assert [p.reference for p in problems.recent(conn)] == ["abc123"]
     finally:
         conn.close()
 

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Recent problems · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Recent problems</h1>
+
+  {% if problems %}
+    <p class="aside">
+      Times something failed in the interface. Each has a reference, which is
+      also written beside the full details in the service log — so you can quote
+      one without having to find or read that log yourself.
+    </p>
+
+    <ul class="rows">
+      {% for problem in problems %}
+        <li>
+          <div>
+            <span class="when">{{ problem.occurred_at | friendly_time }}</span>
+            <span class="text">Something failed on {{ problem.where }}.</span>
+            <span class="aside">{{ problem.kind }}</span>
+          </div>
+          <span class="mono">{{ problem.reference }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <h2>Why so little detail</h2>
+    <p>
+      What actually failed is not shown, here or on the error page itself. The
+      message can carry a file path or a piece of a note, and note text does not
+      belong anywhere the encryption does not reach — a log file most of all.
+      What is kept is when it happened, which page you were on, and the kind of
+      fault. The rest lives in the service log, under the same reference.
+    </p>
+    <p class="aside">
+      Only the most recent {{ kept }} are kept. Nothing here is part of your
+      record, and none of it is used for anything else.
+    </p>
+  {% else %}
+    <p>Nothing has gone wrong since this record was made. </p>
+    <p class="aside">
+      If a page ever shows an error, it will appear here with a reference you
+      can quote.
+    </p>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">Your notes</a> ·
+    <a href="{{ url_for('verify_record') }}">Check the record</a> ·
+    <a href="{{ url_for('home') }}">Write a note</a>
+  </p>
+
+{% endblock %}
