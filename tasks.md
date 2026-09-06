@@ -1028,12 +1028,40 @@ says whoever held the key stood behind the record at that moment, and nothing
 else. Two interfaces describing one guarantee differently is how a reader ends
 up believing whichever version claimed more.
 
+### Part 3 — the signing call was wrong, and reading the source found it ✅
+
+`PivSigner.sign` hashed the payload here and passed `Prehashed` as the *padding*
+argument. Padding is read only for RSA; for an EC key the library looks for
+`Prehashed` on the **hash algorithm**. So the card would have been handed a
+digest and told to hash it — signing `SHA256(SHA256(payload))`, which nothing
+could verify. `sign_head` checks its own work before storing, so it would have
+refused rather than recorded something worthless, but `counselog sign` would
+simply never have worked.
+
+Found by downloading the `yubikey-manager` 5.9.2 wheel and reading
+`yubikit/piv.py`, with no key attached. The corrected call is the one `ykman`'s
+own `check_key` makes: the message goes in whole with `hashes.SHA256()`, and the
+signature verifies with `ec.ECDSA(SHA256)` over that message — which is exactly
+what `verify_signature` already did.
+
+**The tests now drive a fake card that behaves like the real one**, reproducing
+the branch in `_pad_message` rather than agreeing with whatever it is passed. A
+permissive mock would have accepted the broken call happily; this one signs what
+the card would sign, so a wrong call fails here the way it would fail on the
+key. It asserts the slot is 9c, the curve is P-256, and the PIN is verified
+every time. Confirmed by reintroducing the bug and watching three tests fail.
+
+The lazy import means `yubikit.piv` is not available on a desktop, so the test
+injects a stub carrying the real constants — 0x9C and 0x11, read out of the same
+source.
+
 ### Still to do — needs the laptop
 
-`PivSigner` has never touched hardware. Before it is trusted: the setup
-checklist below, `ykman piv keys generate 9c`, a certificate in the slot for
-`get_certificate` to return, then `counselog sign` for real. Everything else in
-phase 7 is built and tested.
+The custody claim is still untested: no signature in this project has yet been
+made by a key that cannot be copied. Before it is trusted: the setup checklist
+below, `ykman piv keys generate 9c`, a certificate in the slot for
+`get_certificate` to return, then `counselog sign` for real. The API contract is
+now verified against the package source; what remains is the hardware.
 
 ### Laptop setup checklist
 

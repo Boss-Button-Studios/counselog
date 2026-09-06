@@ -31,7 +31,7 @@ from typing import Protocol
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import ec, utils
+from cryptography.hazmat.primitives.asymmetric import ec
 
 # Bumped only if the signed bytes change shape. An old signature keeps verifying
 # under the version it was made with, the way chain entries record their canon
@@ -165,10 +165,15 @@ class PivSigner:
     process (see CLAUDE.md). Unlike phase 1's unlock path, PIV speaks over a
     smartcard connection, so this one does need pyscard and a running pcscd.
 
-    **Unverified against real hardware.** The reference desktop has no key. Every
-    line below is written from the documented API and must be run on the laptop
-    before it is trusted — the same status `_hardware_responder` carried through
-    phase 1, and for the same reason.
+    **Unverified against real hardware.** The reference desktop has no key, so
+    the custody claim is untested until this runs on the laptop — the same status
+    `_hardware_responder` carried through phase 1, and for the same reason.
+
+    What *is* verified is the API contract: every call here was checked against
+    the `yubikey-manager` 5.9.2 source, and the tests drive it through a fake
+    card that mimics the library's own `_pad_message` behaviour. That is what
+    caught the signing call being wrong in a way no amount of re-reading my own
+    code would have shown.
     """
 
     pin: str
@@ -204,13 +209,24 @@ class PivSigner:
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
 
-    def sign(self, payload: bytes) -> bytes:  # pragma: no cover - needs the hardware
+    def sign(self, payload: bytes) -> bytes:
+        """Sign with the key in the slot. The PIN is verified for every call.
+
+        The message goes in **whole**, with SHA-256 named as the algorithm to
+        hash it with. The first version of this hashed the payload here and
+        passed `Prehashed` as the *padding* argument, which does nothing: the
+        library checks for `Prehashed` on the `hash_algorithm` argument, and
+        padding is only read for RSA. The card would have signed
+        `SHA256(SHA256(payload))` — a signature that could never verify, and
+        `sign_head` would have refused to record it. Found by reading the
+        package source before the key was ever plugged in.
+
+        This is now the same call `ykman`'s own `check_key` makes, and the
+        signature it returns verifies with `ec.ECDSA(SHA256)` over the message,
+        which is exactly what `verify_signature` does.
+        """
         from yubikit.piv import SLOT, KEY_TYPE
 
         session = self._session()
         session.verify_pin(self.pin)
-        # The card signs a digest, not the message: PIV has no hash step of its
-        # own, so the hashing happens here and the card does the curve maths.
-        digest = hashlib.sha256(payload).digest()
-        return session.sign(SLOT.SIGNATURE, KEY_TYPE.ECCP256, digest,
-                            hashes.SHA256(), utils.Prehashed(hashes.SHA256()))
+        return session.sign(SLOT.SIGNATURE, KEY_TYPE.ECCP256, payload, hashes.SHA256())

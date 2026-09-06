@@ -93,6 +93,163 @@ def test_a_malformed_key_or_signature_is_answered_no_not_raised(rubbish, signer)
     assert verify_signature(signer.public_key_der(), rubbish, payload) is False
 
 
+# ── the hardware call, against a card that behaves like the real one ─────────
+#
+# The YubiKey itself cannot be tested here. What can be — and what actually went
+# wrong — is the *call*: which argument carries the hash algorithm, and whether
+# the message goes in whole or pre-hashed. This fake reproduces the branch in
+# `yubikit.piv._pad_message` exactly, so a wrong call fails here the way it would
+# fail on the key.
+
+
+class FakeCard:
+    """A stand-in for `PivSession`, faithful to the parts this code uses.
+
+    Deliberately not a mock that records calls and agrees with everything: the
+    bug this exists to catch was a call that a permissive mock would have
+    accepted happily. It hashes the way the library hashes, so the only
+    signatures it produces are ones the real card would produce too.
+    """
+
+    def __init__(self, key):
+        self.key = key
+        self.pin_verified = False
+        self.signed_message = None
+        self.hash_algorithm = None
+        self.padding = "not passed"
+
+    def verify_pin(self, pin):
+        self.pin_verified = True
+
+    def get_certificate(self, slot):
+        class Certificate:
+            def __init__(self, key):
+                self._key = key
+
+            def public_key(self):
+                return self._key.public_key()
+
+        return Certificate(self.key)
+
+    def sign(self, slot, key_type, message, hash_algorithm, padding=None):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec, utils
+
+        assert self.pin_verified, "PIV slot 9c requires the PIN for every operation"
+        assert int(slot) == PIV_SLOT_SIGNATURE, "must be slot 9c, not another key"
+        assert int(key_type) == PIV_KEY_TYPE_ECCP256, "the record's curve is P-256"
+        self.signed_message = message
+        self.hash_algorithm = hash_algorithm
+        self.padding = padding
+
+        # The branch from yubikit.piv._pad_message: for EC keys, `Prehashed` is
+        # looked for on the hash algorithm, and padding is read only for RSA.
+        if isinstance(hash_algorithm, utils.Prehashed):
+            digest = message
+        else:
+            hasher = hashes.Hash(hash_algorithm)
+            hasher.update(message)
+            digest = hasher.finalize()
+        return self.key.sign(digest, ec.ECDSA(utils.Prehashed(hashes.SHA256())))
+
+
+# The desktop does not install the [yubikey] extra — that is the whole reason it
+# is an extra — so `yubikit.piv` is not importable here. These are the real
+# values, read out of yubikey-manager 5.9.2: SLOT.SIGNATURE is PIV slot 9c, the
+# one that demands the PIN for every operation, and ECCP256 is P-256. Pinning
+# the numbers means the test asserts what the card will actually be told.
+PIV_SLOT_SIGNATURE = 0x9C
+PIV_KEY_TYPE_ECCP256 = 0x11
+
+
+@pytest.fixture
+def card(monkeypatch):
+    """A fake card, and just enough of `yubikit.piv` for the lazy import to find."""
+    import sys
+    import types
+    from enum import IntEnum
+
+    class SLOT(IntEnum):
+        SIGNATURE = PIV_SLOT_SIGNATURE
+
+    class KEY_TYPE(IntEnum):
+        ECCP256 = PIV_KEY_TYPE_ECCP256
+
+    module = types.ModuleType("yubikit.piv")
+    module.SLOT = SLOT
+    module.KEY_TYPE = KEY_TYPE
+    package = types.ModuleType("yubikit")
+    package.piv = module
+    monkeypatch.setitem(sys.modules, "yubikit", package)
+    monkeypatch.setitem(sys.modules, "yubikit.piv", module)
+
+    from core.crypto import signing
+
+    fake = FakeCard(SoftwareSigner.generate().private_key)
+    monkeypatch.setattr(signing.PivSigner, "_session", lambda self: fake)
+    return fake
+
+
+def test_a_signature_from_the_card_verifies_against_the_payload(card):
+    """The bug this catches: hashing the payload here and passing `Prehashed` as
+    the padding meant the card signed SHA256(SHA256(payload)), which nothing
+    could ever verify."""
+    from core.crypto.signing import PivSigner
+
+    signer = PivSigner(pin="123456")
+    payload = signed_bytes(seq=4, entry_hash="e" * 64, signed_at="2026-09-06T09:00:00+00:00")
+
+    made = signer.sign(payload)
+
+    assert verify_signature(signer.public_key_der(), made, payload)
+
+
+def test_the_whole_message_is_sent_not_a_digest(card):
+    """PIV hashes what it is given. Sending a digest and naming a hash algorithm
+    hashes it a second time."""
+    from cryptography.hazmat.primitives import hashes
+    from core.crypto.signing import PivSigner
+
+    payload = signed_bytes(seq=1, entry_hash="a" * 64, signed_at="2026-09-06T09:00:00+00:00")
+    PivSigner(pin="123456").sign(payload)
+
+    assert card.signed_message == payload, "the payload must go to the card whole"
+    assert isinstance(card.hash_algorithm, hashes.SHA256)
+    assert card.padding is None, "padding is read only for RSA and must stay out of it"
+
+
+def test_the_pin_is_verified_before_every_signature(card):
+    """Slot 9c is the one that asks every time; that is why it was chosen."""
+    from core.crypto.signing import PivSigner
+
+    PivSigner(pin="123456").sign(b"anything")
+    assert card.pin_verified
+
+
+def test_the_public_key_comes_from_the_certificate_in_the_slot(card):
+    """The record stores the key it will later verify against, so this must be
+    the key in the slot and not some other one the process happens to hold."""
+    from cryptography.hazmat.primitives import serialization
+    from core.crypto.signing import PivSigner, key_id
+
+    expected = card.key.public_key().public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo)
+
+    assert key_id(PivSigner(pin="123456").public_key_der()) == key_id(expected)
+
+
+def test_a_record_can_be_signed_by_the_card(conn, written, card):
+    """End to end through the same path the laptop will take, with only the
+    custody faked."""
+    from core.crypto.signing import PivSigner
+
+    recorded = signatures.sign_head(conn, PivSigner(pin="123456"), label="yubikey")
+
+    assert signatures.verify_coverage(conn).ok
+    assert recorded.covers_seq == written.seq
+
+
 # ── recording one ────────────────────────────────────────────────────────────
 
 
