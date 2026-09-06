@@ -1055,6 +1055,34 @@ The lazy import means `yubikit.piv` is not available on a desktop, so the test
 injects a stub carrying the real constants — 0x9C and 0x11, read out of the same
 source.
 
+### Part 4 — signing a record on a machine that does not hold it ✅
+
+`core/detached.py`, `signatures.{request_for_head,sign_request,attach}`,
+`counselog sign-request | sign-offline | sign-attach`.
+
+Prompted by a hardware fact rather than a design review: the YubiKey is USB-C and
+the desktop holding the record has no USB-C port. The fix is better than the
+thing it works around. **Signing never touches note text** — it needs the chain
+position and the head's hash — so the key never has to be on the machine holding
+the notes, and a machine holding both is a machine where one compromise takes
+everything.
+
+Three files, three steps, and only a hash travels: the same value `/verify`
+already tells you to write down somewhere other than that machine.
+
+Both files cross a machine boundary, possibly on a USB stick, so they are
+untrusted input on the way back: exact format marker, exact version, a position
+that is a position, a hash that is 64 lowercase hex, base64 that decodes, and a
+size cap before parsing. A signature is then checked against the chain *before*
+it is stored — the position must exist, the hash there must be the one signed,
+and the signature must verify. Storing an unverifiable row would report tampering
+on every check from then on, which is a permanent false alarm.
+
+Attaching the same file twice is refused rather than duplicated, because these
+files are carried by hand and that will happen. Two different keys signing the
+same position is not a duplicate and is allowed — a second device vouching is
+normal.
+
 ### Still to do — needs the laptop
 
 The custody claim is still untested: no signature in this project has yet been

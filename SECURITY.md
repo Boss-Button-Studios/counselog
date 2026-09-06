@@ -139,6 +139,20 @@ on-device, non-extractable, PIN required for every operation. The public half is
 stored in the record, so a copy of the database can be verified by someone
 holding nothing else.
 
+**The key does not have to be on the machine holding the notes.** Signing needs
+the chain position and the head's hash and never touches note text, so the record
+can stay on one machine and the key on another: `sign-request` writes out a
+position and a hash, `sign-offline` signs it wherever the key is, `sign-attach`
+puts it back. Only a hash crosses, and it is the same hash `/verify` already
+tells you to keep somewhere else. This is stronger than keeping both together,
+where one compromise takes the notes *and* the ability to vouch for them.
+
+Both carried files are treated as untrusted on the way in. A signature is checked
+against the chain before it is stored — the position must exist, the hash there
+must be the one that was signed, and the signature must verify — because an
+unverifiable row would be reported as tampering every time the record is checked
+from then on.
+
 **It proves:** whoever held that key vouched for this record at that moment.
 
 **It does not prove:**

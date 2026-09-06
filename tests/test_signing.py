@@ -17,7 +17,7 @@ import secrets
 import pytest
 import sqlcipher3
 
-from core import db, models, signatures
+from core import db, detached, models, signatures
 from core.crypto.signing import (
     SoftwareSigner,
     key_id,
@@ -474,3 +474,122 @@ def test_verify_says_plainly_when_nothing_has_been_signed(tmp_path, monkeypatch)
     result = runner.invoke(cli, ["verify", "--unlock-with", "password"], input="pw\n")
     assert "Not signed" in result.output
     assert "who recorded it" in result.output
+
+
+# ── the three-step path, as two machines would run it ────────────────────────
+
+
+def _record_at(runner, cli, tmp_path, monkeypatch, home_name):
+    """A record in its own home, so the two machines are genuinely separate."""
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / home_name))
+    monkeypatch.setenv("COUNSELOG_ENV_FILE", str(tmp_path / "absent.env"))
+    runner.invoke(cli, ["keys", "init", "--factor", "password", "--label", "t"],
+                  input="pw\npw\n", catch_exceptions=False)
+    runner.invoke(cli, ["init", "--unlock-with", "password"], input="pw\n",
+                  catch_exceptions=False)
+    runner.invoke(cli, ["note", "-m", "Ada raised the timeline",
+                        "--unlock-with", "password"], input="pw\n",
+                  catch_exceptions=False)
+
+
+def test_the_three_steps_sign_a_record_the_key_never_met(tmp_path, monkeypatch):
+    """The whole point, driven the way a person would: the machine with the
+    record never sees the key, and the machine with the key never sees a note."""
+    from click.testing import CliRunner
+    from laptop.cli import cli
+    import laptop.sign_cli as sign_cli
+
+    runner = CliRunner()
+    _record_at(runner, cli, tmp_path, monkeypatch, "desktop")
+    request_file = tmp_path / "request.json"
+    signature_file = tmp_path / "signature.json"
+
+    asked = runner.invoke(cli, ["sign-request", str(request_file),
+                                "--unlock-with", "password"], input="pw\n")
+    assert asked.exit_code == 0, asked.output
+    assert "Ada raised the timeline" not in request_file.read_text()
+
+    # On the other machine: a key, no database, no passphrase prompt at all.
+    monkeypatch.setattr(sign_cli, "build_signer",
+                        lambda pin: SoftwareSigner.generate())
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "nothing-here"))
+    made = runner.invoke(cli, ["sign-offline", str(request_file),
+                               str(signature_file)], input="1234\n")
+    assert made.exit_code == 0, made.output
+
+    # Back where the record is.
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "desktop"))
+    attached = runner.invoke(cli, ["sign-attach", str(signature_file),
+                                   "--label", "laptop", "--unlock-with", "password"],
+                             input="pw\n")
+    assert attached.exit_code == 0, attached.output
+    assert "Signed up to entry 1 of 1" in attached.output
+
+    checked = runner.invoke(cli, ["verify", "--unlock-with", "password"], input="pw\n")
+    assert "Signed up to entry 1 of 1" in checked.output
+
+
+def test_a_signature_for_another_record_is_refused_at_the_door(tmp_path, monkeypatch):
+    """Two records, one key. The file looks right and is not."""
+    from click.testing import CliRunner
+    from laptop.cli import cli
+    import laptop.sign_cli as sign_cli
+
+    runner = CliRunner()
+    signer = SoftwareSigner.generate()
+    monkeypatch.setattr(sign_cli, "build_signer", lambda pin: signer)
+
+    _record_at(runner, cli, tmp_path, monkeypatch, "theirs")
+    theirs = tmp_path / "theirs.json"
+    runner.invoke(cli, ["sign-request", str(theirs), "--unlock-with", "password"],
+                  input="pw\n")
+    signature = tmp_path / "signature.json"
+    runner.invoke(cli, ["sign-offline", str(theirs), str(signature)], input="1234\n")
+
+    # A different record, at the same position, with different notes in it.
+    _record_at(runner, cli, tmp_path, monkeypatch, "mine")
+    result = runner.invoke(cli, ["sign-attach", str(signature),
+                                 "--unlock-with", "password"], input="pw\n")
+
+    assert result.exit_code != 0
+    assert "different record" in result.output
+
+
+def test_a_file_that_is_not_ours_is_refused_by_the_command(tmp_path, monkeypatch):
+    from click.testing import CliRunner
+    from laptop.cli import cli
+
+    runner = CliRunner()
+    _record_at(runner, cli, tmp_path, monkeypatch, "desktop")
+    rubbish = tmp_path / "rubbish.json"
+    rubbish.write_text("{\"format\": \"something.else\"}")
+
+    result = runner.invoke(cli, ["sign-attach", str(rubbish),
+                                 "--unlock-with", "password"], input="pw\n")
+    assert result.exit_code != 0
+    assert "not a counselog" in result.output
+
+
+def test_signing_offline_needs_no_record_and_says_so_when_the_key_is_absent(tmp_path,
+                                                                           monkeypatch):
+    from click.testing import CliRunner
+    from core.crypto import SignerUnavailable
+    from laptop.cli import cli
+    import laptop.sign_cli as sign_cli
+
+    runner = CliRunner()
+    monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "no-record-here"))
+    monkeypatch.setenv("COUNSELOG_ENV_FILE", str(tmp_path / "absent.env"))
+
+    request = tmp_path / "request.json"
+    request.write_text(detached.SigningRequest(seq=3, entry_hash="a" * 64).to_json())
+
+    def no_key(pin):
+        raise SignerUnavailable("No YubiKey found. Plug one in and try again.")
+
+    monkeypatch.setattr(sign_cli, "build_signer", no_key)
+    result = runner.invoke(cli, ["sign-offline", str(request),
+                                 str(tmp_path / "out.json")], input="1234\n")
+
+    assert result.exit_code != 0
+    assert "Plug one in" in result.output

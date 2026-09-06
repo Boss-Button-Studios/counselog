@@ -1,5 +1,11 @@
 """Vouching for the record, and saying how much of it is vouched for.
 
+Four commands, because the key and the record do not have to be on the same
+machine. `sign` is for when they are. When they are not — a key that will not
+fit the port on the machine holding the notes, or a deliberate separation —
+`sign-request` writes out what needs signing, `sign-offline` signs it wherever
+the key is, and `sign-attach` puts the result back. Only a hash travels.
+
 Signing needs the YubiKey and there is no software alternative offered, which is
 a deliberate refusal rather than a gap. A signing key kept on disk could be used
 by anyone who can already open the database, so a signature made with one would
@@ -13,9 +19,11 @@ except the hardware custody be exercised on a machine with no key in it.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import click
 
-from core import models, signatures
+from core import detached, models, signatures
 from core.crypto import PivSigner, SignerUnavailable, SigningError
 from laptop.unlock import FACTOR_CHOICES, open_database
 
@@ -101,4 +109,98 @@ def report(conn) -> signatures.CoverageResult:
     return result
 
 
-__all__ = ["sign", "report", "build_signer"]
+__all__ = ["sign", "sign_request", "sign_offline", "sign_attach",
+           "report", "build_signer"]
+
+
+@click.command("sign-request")
+@click.argument("path", type=click.Path(dir_okay=False, writable=True, path_type=Path))
+@click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None)
+def sign_request(path: Path, unlock_with: str | None) -> None:
+    """Write out what needs signing, to sign on the machine with the key.
+
+    Run this where the record is. The file holds a position in the chain and the
+    hash at that position — the same value the verify page tells you to keep
+    somewhere else — and nothing about any note. It is safe to carry on a USB
+    stick, and useless to anyone who takes it.
+    """
+    conn = open_database(unlock_with)
+    try:
+        request = signatures.request_for_head(conn)
+    except signatures.SignatureError as exc:
+        raise click.ClickException(str(exc)) from exc
+    finally:
+        conn.close()
+
+    path.write_text(request.to_json(), encoding="utf-8")
+    click.echo(f"Wrote {path}, covering {request.seq} "
+               f"entr{'y' if request.seq == 1 else 'ies'}.")
+    click.echo("Take it to the machine with the key and run:")
+    click.echo(f"    counselog sign-offline {path.name} signature.json")
+
+
+@click.command("sign-offline")
+@click.argument("request_path", type=click.Path(exists=True, dir_okay=False,
+                                                path_type=Path))
+@click.argument("out_path", type=click.Path(dir_okay=False, writable=True,
+                                            path_type=Path))
+@click.option("--label", default=None, help="What to call this key in the record.")
+def sign_offline(request_path: Path, out_path: Path, label: str | None) -> None:
+    """Sign a request with your YubiKey, on a machine with no record on it.
+
+    Needs no database, no passphrase and no notes — only the key. That is the
+    point: the machine holding your notes never has to hold the key that vouches
+    for them.
+    """
+    try:
+        request = detached.read_request(request_path.read_text(encoding="utf-8"))
+    except (detached.DetachedError, OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(f"Signing {request.seq} entr{'y' if request.seq == 1 else 'ies'} "
+               f"of a record, at {request.entry_hash[:16]}…")
+    pin = click.prompt("YubiKey PIN", hide_input=True)
+
+    try:
+        signed = signatures.sign_request(request, build_signer(pin))
+    except (SignerUnavailable, SigningError, signatures.SignatureError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    out_path.write_text(signed.to_json(), encoding="utf-8")
+    click.secho(f"Wrote {out_path}.", fg="green")
+    click.echo("Take it back and run:")
+    click.echo(f"    counselog sign-attach {out_path.name}")
+
+
+@click.command("sign-attach")
+@click.argument("path", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option("--label", default=None,
+              help="What to call this key in the record, e.g. 'work laptop'.")
+@click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None)
+def sign_attach(path: Path, label: str | None, unlock_with: str | None) -> None:
+    """Add a signature made elsewhere to the record.
+
+    Checked before it is stored: that the position is in this chain, that the
+    hash there is the one that was signed, and that the signature verifies. A
+    file that fails any of those is refused — storing it would report a broken
+    signature every time the record is checked from then on.
+    """
+    try:
+        signed = detached.read_signature(path.read_text(encoding="utf-8"))
+    except (detached.DetachedError, OSError, UnicodeDecodeError) as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    conn = open_database(unlock_with)
+    try:
+        try:
+            recorded = signatures.attach(conn, signed, label=label)
+        except signatures.SignatureError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+        click.secho(f"Attached. Signed {recorded.covers_seq} "
+                    f"entr{'y' if recorded.covers_seq == 1 else 'ies'} "
+                    f"with key {recorded.pubkey_id}.", fg="green")
+        click.echo()
+        report(conn)
+    finally:
+        conn.close()

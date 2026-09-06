@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core import models
+from core.detached import DetachedSignature, SigningRequest
 from core.crypto.signing import (
     ALGORITHM,
     SIGNED_VERSION,
@@ -120,6 +121,104 @@ def sign_head(conn, signer: Signer, *, label: str | None = None) -> Signature:
         )
         signature_id = int(cursor.lastrowid)
     return _signature(conn, signature_id)
+
+
+def request_for_head(conn) -> SigningRequest:
+    """What a machine holding the key needs in order to sign this record.
+
+    A position and a hash — nothing else, and nothing secret. The hash is the
+    same value `/verify` already tells you to write down somewhere other than
+    this machine, so carrying it to another machine gives away nothing that was
+    not already meant to leave.
+    """
+    head = models.chain_head(conn)
+    if head is None:
+        raise SignatureError("There are no notes to sign yet.")
+    return SigningRequest(seq=head.seq, entry_hash=head.entry_hash)
+
+
+def attach(conn, signed: DetachedSignature, *, label: str | None = None) -> Signature:
+    """Store a signature made on another machine, after checking it belongs here.
+
+    Three things are checked, and the order matters because the messages differ.
+    Is that position in this chain at all? Does the hash there match what was
+    signed — that is, is this a signature about *this* record rather than a
+    similar one? And does the signature verify?
+
+    A file that fails any of these is refused rather than stored. An unverifiable
+    row would be reported as a broken signature every time the record is checked
+    from then on, which is a permanent false alarm about tampering.
+    """
+    entries = {entry.seq: entry for entry in models.chain_entries(conn)}
+    entry = entries.get(signed.seq)
+    if entry is None:
+        raise SignatureError(
+            f"That signature covers position {signed.seq}, which is not in this "
+            "record. It was made for a different record, or for a later state of "
+            "this one.")
+    if entry.entry_hash != signed.entry_hash:
+        raise SignatureError(
+            f"That signature is about a different record. Position {signed.seq} "
+            "here does not have the hash it was signed over.")
+
+    payload = signed_bytes(seq=signed.seq, entry_hash=signed.entry_hash,
+                           signed_at=signed.signed_at)
+    if not verify_signature(signed.public_key, signed.signature, payload):
+        raise SignatureError(
+            "That signature does not verify. Nothing has been recorded.")
+
+    identifier = key_id(signed.public_key)
+    if _already_here(conn, identifier, signed):
+        raise SignatureError("That signature is already in this record.")
+
+    with conn:
+        conn.execute(
+            "INSERT INTO signing_keys (id, algorithm, public_key, label, first_seen) "
+            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING",
+            (identifier, signed.algorithm, signed.public_key, label, signed.signed_at),
+        )
+        cursor = conn.execute(
+            "INSERT INTO signatures (covers_seq, algorithm, pubkey_id, signature, "
+            "signed_at) VALUES (?, ?, ?, ?, ?)",
+            (signed.seq, signed.algorithm, identifier, signed.signature,
+             signed.signed_at),
+        )
+        signature_id = int(cursor.lastrowid)
+    return _signature(conn, signature_id)
+
+
+def _already_here(conn, pubkey_id: str, signed: DetachedSignature) -> bool:
+    """Has this exact signature been attached before?
+
+    Attaching the same file twice is a thing a person will do — the files are
+    carried by hand — and two identical rows say nothing the first did not.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM signatures WHERE pubkey_id = ? AND covers_seq = ? "
+        "AND signature = ?", (pubkey_id, signed.seq, signed.signature)).fetchone()
+    return row is not None
+
+
+def sign_request(request: SigningRequest, signer: Signer) -> DetachedSignature:
+    """Sign a request on a machine that has the key and not the record.
+
+    Takes no connection, deliberately: this runs where there is no database to
+    open, and a function that could not accidentally touch one is the clearest
+    way to say so.
+    """
+    public_der = signer.public_key_der()
+    signed_at = models.utc_now()
+    payload = signed_bytes(seq=request.seq, entry_hash=request.entry_hash,
+                           signed_at=signed_at)
+    raw = signer.sign(payload)
+
+    if not verify_signature(public_der, raw, payload):
+        raise SignatureError(
+            "The signature this key produced does not verify. Nothing was written.")
+
+    return DetachedSignature(
+        seq=request.seq, entry_hash=request.entry_hash, signed_at=signed_at,
+        algorithm=ALGORITHM, public_key=public_der, signature=raw)
 
 
 def list_signatures(conn) -> list[Signature]:

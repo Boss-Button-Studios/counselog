@@ -10,7 +10,7 @@ import click
 from laptop.keys_cli import keys
 from laptop.notes_cli import forget, import_file, init, note, verify
 from laptop.people_cli import people
-from laptop.sign_cli import sign
+from laptop.sign_cli import sign, sign_attach, sign_offline, sign_request
 from laptop.tag_cli import review, tag
 from laptop.transport_cli import certs, doctor, sync
 
@@ -28,6 +28,9 @@ cli.add_command(note)
 cli.add_command(import_file)
 cli.add_command(verify)
 cli.add_command(sign)
+cli.add_command(sign_request)
+cli.add_command(sign_offline)
+cli.add_command(sign_attach)
 cli.add_command(forget)
 cli.add_command(certs)
 cli.add_command(doctor)
