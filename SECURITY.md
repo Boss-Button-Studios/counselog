@@ -274,6 +274,17 @@ pages alive regardless. Deletion here means "removed from the record", not
 - **On the laptop**, PIV signing needs `swig`, `libpcsclite-dev`, `pcscd` and
   udev rules. The pip wheel bundles no udev rules, so install the distro
   `yubikey-manager` package alongside it for those.
+- **Change the YubiKey's management key and PUK before generating a signing
+  key.** Both ship at a documented default, and the management key is what
+  authorises key generation and import — left at the default, anyone with brief
+  physical access can overwrite your signing key or import one of their own and
+  sign as you, which is precisely the property the signature exists to provide.
+  `ykman piv access change-management-key --generate --protect` stores a random
+  one on the card behind the PIN, so there is nothing extra to keep. The PUK
+  matters for the same reason one level down: it can reset a blocked PIN.
+- **Generate the slot with `--pin-policy ALWAYS`.** Slot 9c defaults to asking
+  for the PIN every time, but stating it means the card enforces what this
+  document claims rather than the claim resting on a default.
 - **Do not roll back a build past a schema migration** with a database that has
   already been migrated. An older build refuses to open a newer database, which
   is deliberate — it would otherwise read columns it does not understand.
