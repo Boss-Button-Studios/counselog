@@ -25,6 +25,7 @@ accepts, so the hardware is a change of custody, not of format.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 from dataclasses import dataclass
 from typing import Protocol
@@ -151,6 +152,50 @@ def verify_signature(public_key_der: bytes, signature: bytes, payload: bytes) ->
 # ── the hardware path, laptop only ───────────────────────────────────────────
 
 
+@contextlib.contextmanager
+def _card_errors(doing: str):
+    """Turn what the card says into what a person can act on (Law 6).
+
+    Every one of these is a thing that will actually happen: a mistyped PIN, a
+    slot generated with the wrong algorithm, a slot with a key but no
+    certificate. Left alone they surface as an APDU status code in a traceback,
+    which tells the person holding the key nothing about what to do next.
+
+    The remaining PIN attempts are worth repeating exactly, because the next
+    piece of information after "wrong PIN" is how many tries are left before the
+    key locks itself.
+    """
+    try:
+        from yubikit.core import BadResponseError, InvalidPinError, NotSupportedError
+        from yubikit.core.smartcard import ApduError
+    except ImportError as exc:  # pragma: no cover - needs the [yubikey] extra
+        raise SignerUnavailable(
+            "YubiKey support is not installed. Install it with: "
+            'pip install -e ".[yubikey]"'
+        ) from exc
+
+    try:
+        yield
+    except InvalidPinError as exc:
+        remaining = getattr(exc, "attempts_remaining", None)
+        raise SigningError(
+            "That PIN was not accepted."
+            + (f" {remaining} attempt(s) remain before the key blocks itself."
+               if remaining is not None else "")) from exc
+    except BadResponseError as exc:
+        raise SigningError(
+            f"The YubiKey answered in a way this could not read, trying to "
+            f"{doing}. If slot 9c has no certificate in it, generate one — the "
+            "public key is read from there.") from exc
+    except NotSupportedError as exc:
+        raise SigningError(f"This YubiKey cannot {doing}: {exc}") from exc
+    except ApduError as exc:
+        raise SigningError(
+            f"The YubiKey refused to {doing} (card status 0x{exc.sw:04x}). If "
+            "slot 9c is empty, or holds a key that is not ECCP256, generate it "
+            "again with that algorithm.") from exc
+
+
 @dataclass
 class PivSigner:
     """A signer backed by a YubiKey's PIV slot.
@@ -201,10 +246,32 @@ class PivSigner:
         device, _info = devices[0]
         return PivSession(device.open_connection(SmartCardConnection))
 
-    def public_key_der(self) -> bytes:  # pragma: no cover - needs the hardware
+    def public_key_der(self) -> bytes:
+        """Read the public half out of the certificate in the slot.
+
+        The key type is checked here rather than left to the card, because the
+        card's refusal is an APDU status code and this is a sentence. Generating
+        a slot through the manager GUI defaults to RSA, so a key of the wrong
+        type is the most likely thing to be sitting there.
+        """
         from yubikit.piv import SLOT
-        certificate = self._session().get_certificate(SLOT.SIGNATURE)
-        return certificate.public_key().public_bytes(
+
+        with _card_errors("read the certificate in slot 9c"):
+            certificate = self._session().get_certificate(SLOT.SIGNATURE)
+
+        public = certificate.public_key()
+        if not isinstance(public, ec.EllipticCurvePublicKey):
+            raise SigningError(
+                f"The key in slot 9c is {type(public).__name__.replace('PublicKey', '')}, "
+                "and Counselog signs with ECDSA P-256. Generate the slot again "
+                "choosing ECCP256 — in the manager GUI it is the algorithm "
+                "dropdown, which defaults to RSA.")
+        if not isinstance(public.curve, ec.SECP256R1):
+            raise SigningError(
+                f"The key in slot 9c is on curve {public.curve.name}, and "
+                "Counselog signs with P-256 (ECCP256). Generate the slot again.")
+
+        return public.public_bytes(
             encoding=serialization.Encoding.DER,
             format=serialization.PublicFormat.SubjectPublicKeyInfo,
         )
@@ -228,5 +295,8 @@ class PivSigner:
         from yubikit.piv import SLOT, KEY_TYPE
 
         session = self._session()
-        session.verify_pin(self.pin)
-        return session.sign(SLOT.SIGNATURE, KEY_TYPE.ECCP256, payload, hashes.SHA256())
+        with _card_errors("verify the PIN"):
+            session.verify_pin(self.pin)
+        with _card_errors("sign with the key in slot 9c"):
+            return session.sign(SLOT.SIGNATURE, KEY_TYPE.ECCP256, payload,
+                                hashes.SHA256())

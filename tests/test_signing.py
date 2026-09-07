@@ -178,10 +178,46 @@ def card(monkeypatch):
     module = types.ModuleType("yubikit.piv")
     module.SLOT = SLOT
     module.KEY_TYPE = KEY_TYPE
+
+    # Shaped like the real ones: InvalidPinError carries the attempts left, and
+    # ApduError carries the card's status word. Both are what the messages read.
+    core = types.ModuleType("yubikit.core")
+
+    class CommandError(Exception):
+        pass
+
+    class BadResponseError(CommandError):
+        pass
+
+    class NotSupportedError(CommandError):
+        pass
+
+    class InvalidPinError(CommandError, ValueError):
+        def __init__(self, attempts_remaining, message=None):
+            super().__init__(message or f"Invalid PIN/PUK, {attempts_remaining} remaining")
+            self.attempts_remaining = attempts_remaining
+
+    class ApduError(CommandError):
+        def __init__(self, data, sw):
+            super().__init__(f"APDU error: SW=0x{sw:04x}")
+            self.data = data
+            self.sw = sw
+
+    core.CommandError = CommandError
+    core.BadResponseError = BadResponseError
+    core.NotSupportedError = NotSupportedError
+    core.InvalidPinError = InvalidPinError
+    smartcard = types.ModuleType("yubikit.core.smartcard")
+    smartcard.ApduError = ApduError
+    core.smartcard = smartcard
+
     package = types.ModuleType("yubikit")
     package.piv = module
+    package.core = core
     monkeypatch.setitem(sys.modules, "yubikit", package)
     monkeypatch.setitem(sys.modules, "yubikit.piv", module)
+    monkeypatch.setitem(sys.modules, "yubikit.core", core)
+    monkeypatch.setitem(sys.modules, "yubikit.core.smartcard", smartcard)
 
     from core.crypto import signing
 
@@ -593,3 +629,76 @@ def test_signing_offline_needs_no_record_and_says_so_when_the_key_is_absent(tmp_
 
     assert result.exit_code != 0
     assert "Plug one in" in result.output
+
+
+# ── what the card says, turned into what a person can do ─────────────────────
+
+
+def test_a_slot_holding_an_rsa_key_is_named_rather_than_refused_obscurely(card,
+                                                                          monkeypatch):
+    """The most likely wrong state, because the manager GUI defaults to RSA."""
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from core.crypto.signing import PivSigner, SigningError
+
+    rsa_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(card, "key", rsa_key)
+
+    with pytest.raises(SigningError, match="ECCP256"):
+        PivSigner(pin="123456").public_key_der()
+
+
+def test_a_key_on_the_wrong_curve_is_named(card, monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from core.crypto.signing import PivSigner, SigningError
+
+    monkeypatch.setattr(card, "key", ec.generate_private_key(ec.SECP384R1()))
+
+    with pytest.raises(SigningError, match="P-256"):
+        PivSigner(pin="123456").public_key_der()
+
+
+def test_a_wrong_pin_says_how_many_attempts_are_left(card, monkeypatch):
+    """The next thing anyone wants to know after "wrong PIN"."""
+    import sys
+    from core.crypto.signing import PivSigner, SigningError
+
+    InvalidPinError = sys.modules["yubikit.core"].InvalidPinError
+
+    def refuse(pin):
+        raise InvalidPinError(2)
+
+    monkeypatch.setattr(card, "verify_pin", refuse)
+
+    with pytest.raises(SigningError, match="2 attempt"):
+        PivSigner(pin="000000").sign(b"anything")
+
+
+def test_an_empty_slot_says_to_generate_a_certificate(card, monkeypatch):
+    import sys
+    from core.crypto.signing import PivSigner, SigningError
+
+    ApduError = sys.modules["yubikit.core.smartcard"].ApduError
+
+    def missing(slot):
+        raise ApduError(b"", 0x6A82)  # file not found
+
+    monkeypatch.setattr(card, "get_certificate", missing)
+
+    with pytest.raises(SigningError, match="slot 9c"):
+        PivSigner(pin="123456").public_key_der()
+
+
+def test_a_card_refusing_to_sign_reports_its_status_and_the_likely_cause(card,
+                                                                        monkeypatch):
+    import sys
+    from core.crypto.signing import PivSigner, SigningError
+
+    ApduError = sys.modules["yubikit.core.smartcard"].ApduError
+
+    def refuse(*args, **kwargs):
+        raise ApduError(b"", 0x6A80)  # wrong parameters: the usual wrong-key-type answer
+
+    monkeypatch.setattr(card, "sign", refuse)
+
+    with pytest.raises(SigningError, match="0x6a80"):
+        PivSigner(pin="123456").sign(b"anything")
