@@ -172,6 +172,26 @@ def test_a_file_that_is_not_ours_is_refused_with_a_sentence(text, complaint):
         detached.read_request(text)
 
 
+def test_a_line_lost_in_copying_is_reported_as_a_lost_line():
+    """Hit for real: a request pasted between machines arrived without its
+    `signed_version`, and the message described `None` as a version — sending
+    the reader after a compatibility fault that did not exist."""
+    fields = {"format": detached.REQUEST_MARKER, "format_version": 1,
+              "seq": 5, "entry_hash": "a" * 64}
+
+    with pytest.raises(detached.DetachedError, match="no 'signed_version' line"):
+        detached.read_request(json.dumps(fields))
+
+
+def test_a_genuinely_different_version_still_says_so():
+    """The other half: missing and different must not collapse into one message."""
+    fields = {"format": detached.REQUEST_MARKER, "format_version": 1,
+              "signed_version": 99, "seq": 5, "entry_hash": "a" * 64}
+
+    with pytest.raises(detached.DetachedError, match="signature version 99"):
+        detached.read_request(json.dumps(fields))
+
+
 @pytest.mark.parametrize("seq", [0, -1, "3", 1.5, True, None])
 def test_a_position_that_is_not_a_position_is_refused(seq):
     text = json.dumps({"format": detached.REQUEST_MARKER, "format_version": 1,

@@ -144,18 +144,33 @@ def _parse(text: str, marker: str) -> dict:
             f"That is not a {marker} file"
             + (f" — it says it is {found!r}." if isinstance(found, str) else "."))
 
-    version = fields.get("format_version")
+    # Missing and different are not the same problem, and were reported as if
+    # they were: a file copied by hand loses a line far more often than it comes
+    # from another version, and "version None" sends someone looking for a
+    # compatibility fault that is not there.
+    _present(fields, "format_version")
+    version = fields["format_version"]
     if version != FORMAT_VERSION:
         raise DetachedError(
             f"That file is version {version!r}; this build writes and reads "
             f"version {FORMAT_VERSION}.")
 
-    signed = fields.get("signed_version")
+    _present(fields, "signed_version")
+    signed = fields["signed_version"]
     if signed != SIGNED_VERSION:
         raise DetachedError(
             f"It covers signature version {signed!r}, and this build makes "
             f"version {SIGNED_VERSION}.")
     return fields
+
+
+def _present(fields: dict, name: str) -> None:
+    """Complain about an absent field as an absence, and say the likely cause."""
+    if name not in fields:
+        raise DetachedError(
+            f"That file has no {name!r} line. These files are usually copied by "
+            "hand, and the usual cause is a line lost on the way — check it "
+            "against the one you copied from.")
 
 
 def _seq(fields: dict) -> int:
