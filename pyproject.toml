@@ -51,7 +51,13 @@ dependencies = [
 #
 # Phase 1 (OTP challenge-response) talks HID and does not need pyscard.
 # Phase 7 (PIV signing) needs a SmartCardConnection, so it does.
-yubikey = ["yubikey-manager>=5.9,<6"]
+# >=5.8 rather than >=5.9 because the distro ships 5.8 and it is the same API
+# where this depends on it: `_pad_message` is byte-identical, `PivSession.sign`
+# has the same signature, and SLOT.SIGNATURE / KEY_TYPE.ECCP256 are the same
+# values. Checked against both wheels, not assumed. That matters on a machine
+# with an externally managed Python, where installing the distro package into a
+# --system-site-packages venv avoids building pyscard at all.
+yubikey = ["yubikey-manager>=5.8,<6"]
 
 dev = [
     "pytest>=8.0",

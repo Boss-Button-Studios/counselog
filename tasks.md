@@ -1103,6 +1103,25 @@ A `Projects/` subfolder is ready on the laptop and `swig` is installed
 | `pcscd` | smartcard daemon; runtime requirement for PIV (phase 7) | ⬜ |
 | udev rules | non-root access to the key over HID and CCID | ⬜ |
 
+**PEP 668 changes the shape of this.** A current Ubuntu marks the system Python
+externally managed, so `pip install` into it is refused — correctly. Two
+compliant routes, and the second avoids the build toolchain entirely:
+
+    # A: a venv of its own, pyscard built from sdist
+    python3 -m venv .venv
+    .venv/bin/pip install -e ".[yubikey]"      # needs swig, libpcsclite-dev, python3-dev
+
+    # B: let the distro provide the smartcard stack
+    sudo apt install yubikey-manager           # python3-ykman, python3-pyscard, pcscd, udev
+    python3 -m venv --system-site-packages .venv
+    .venv/bin/pip install -e .                 # no extra: the venv can see the system ykman
+
+B installs 5.8.0 where PyPI has 5.9.2. Checked rather than assumed, since phase 7
+part 3 was written against the 5.9.2 source: `_pad_message` is byte-identical
+between them, `PivSession.sign` has the same signature, `list_all_devices` the
+same return shape, and `SLOT.SIGNATURE` and `KEY_TYPE.ECCP256` the same values.
+The extra's pin is now `>=5.8` to match what was verified.
+
 The udev rules are the easy one to miss: the pip wheel for `yubikey-manager` is
 pure-python and bundles **no** rules, so without them a non-root user gets
 permission errors talking to the key. Installing the distro package alongside
