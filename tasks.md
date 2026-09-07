@@ -1083,6 +1083,19 @@ files are carried by hand and that will happen. Two different keys signing the
 same position is not a duplicate and is allowed — a second device vouching is
 normal.
 
+### Part 5 — the slot was a decoration ✅
+
+Found the moment a real key was set up: the manager GUI generates into slot **9a**
+by default, and `PivSigner.slot` was a field that looked configurable and was
+ignored — every call reached for 9c regardless. A parameter that quietly does
+nothing is worse than not offering one, because it invites someone to set it and
+believe it took effect.
+
+The slot is now honoured, `--slot` is on `sign` and `sign-offline`, and the
+difference is stated rather than buried: 9c asks for the PIN on every operation,
+9a once per session. Both are on-device and non-extractable; only the PIN policy
+differs, and SECURITY.md now says which slot its claim belongs to.
+
 ### Still to do — needs the laptop
 
 The custody claim is still untested: no signature in this project has yet been

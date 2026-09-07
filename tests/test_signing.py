@@ -114,6 +114,7 @@ class FakeCard:
     def __init__(self, key):
         self.key = key
         self.pin_verified = False
+        self.last_slot = None
         self.signed_message = None
         self.hash_algorithm = None
         self.padding = "not passed"
@@ -122,6 +123,8 @@ class FakeCard:
         self.pin_verified = True
 
     def get_certificate(self, slot):
+        self.last_slot = int(slot)
+
         class Certificate:
             def __init__(self, key):
                 self._key = key
@@ -135,8 +138,9 @@ class FakeCard:
         from cryptography.hazmat.primitives import hashes
         from cryptography.hazmat.primitives.asymmetric import ec, utils
 
-        assert self.pin_verified, "PIV slot 9c requires the PIN for every operation"
-        assert int(slot) == PIV_SLOT_SIGNATURE, "must be slot 9c, not another key"
+        assert self.pin_verified, "the PIN must be verified before signing"
+        assert int(slot) in (PIV_SLOT_SIGNATURE, PIV_SLOT_AUTHENTICATION)
+        self.last_slot = int(slot)
         assert int(key_type) == PIV_KEY_TYPE_ECCP256, "the record's curve is P-256"
         self.signed_message = message
         self.hash_algorithm = hash_algorithm
@@ -159,6 +163,7 @@ class FakeCard:
 # one that demands the PIN for every operation, and ECCP256 is P-256. Pinning
 # the numbers means the test asserts what the card will actually be told.
 PIV_SLOT_SIGNATURE = 0x9C
+PIV_SLOT_AUTHENTICATION = 0x9A
 PIV_KEY_TYPE_ECCP256 = 0x11
 
 
@@ -170,6 +175,7 @@ def card(monkeypatch):
     from enum import IntEnum
 
     class SLOT(IntEnum):
+        AUTHENTICATION = PIV_SLOT_AUTHENTICATION
         SIGNATURE = PIV_SLOT_SIGNATURE
 
     class KEY_TYPE(IntEnum):
@@ -449,7 +455,7 @@ def test_signing_needs_the_key_and_says_so_when_it_is_absent(tmp_path, monkeypat
     from core.crypto import SignerUnavailable
     import laptop.sign_cli as sign_cli
 
-    def no_key(pin):
+    def no_key(pin, slot="9c"):
         raise SignerUnavailable("No YubiKey found. Plug one in and try again.")
 
     monkeypatch.setattr(sign_cli, "build_signer", no_key)
@@ -474,7 +480,8 @@ def test_signing_from_the_command_line_records_and_reports_it(tmp_path, monkeypa
     runner.invoke(cli, ["note", "-m", "something", "--unlock-with", "password"],
                   input="pw\n", catch_exceptions=False)
 
-    monkeypatch.setattr(sign_cli, "build_signer", lambda pin: SoftwareSigner.generate())
+    monkeypatch.setattr(sign_cli, "build_signer",
+                        lambda pin, slot="9c": SoftwareSigner.generate())
     signed = runner.invoke(cli, ["sign", "--unlock-with", "password"], input="pw\n1234\n")
     assert signed.exit_code == 0, signed.output
     assert "Signed 1 entry" in signed.output
@@ -547,7 +554,7 @@ def test_the_three_steps_sign_a_record_the_key_never_met(tmp_path, monkeypatch):
 
     # On the other machine: a key, no database, no passphrase prompt at all.
     monkeypatch.setattr(sign_cli, "build_signer",
-                        lambda pin: SoftwareSigner.generate())
+                        lambda pin, slot="9c": SoftwareSigner.generate())
     monkeypatch.setenv("COUNSELOG_HOME", str(tmp_path / "nothing-here"))
     made = runner.invoke(cli, ["sign-offline", str(request_file),
                                str(signature_file)], input="1234\n")
@@ -573,7 +580,7 @@ def test_a_signature_for_another_record_is_refused_at_the_door(tmp_path, monkeyp
 
     runner = CliRunner()
     signer = SoftwareSigner.generate()
-    monkeypatch.setattr(sign_cli, "build_signer", lambda pin: signer)
+    monkeypatch.setattr(sign_cli, "build_signer", lambda pin, slot="9c": signer)
 
     _record_at(runner, cli, tmp_path, monkeypatch, "theirs")
     theirs = tmp_path / "theirs.json"
@@ -620,7 +627,7 @@ def test_signing_offline_needs_no_record_and_says_so_when_the_key_is_absent(tmp_
     request = tmp_path / "request.json"
     request.write_text(detached.SigningRequest(seq=3, entry_hash="a" * 64).to_json())
 
-    def no_key(pin):
+    def no_key(pin, slot="9c"):
         raise SignerUnavailable("No YubiKey found. Plug one in and try again.")
 
     monkeypatch.setattr(sign_cli, "build_signer", no_key)
@@ -702,3 +709,23 @@ def test_a_card_refusing_to_sign_reports_its_status_and_the_likely_cause(card,
 
     with pytest.raises(SigningError, match="0x6a80"):
         PivSigner(pin="123456").sign(b"anything")
+
+
+def test_the_slot_is_used_rather_than_decorated(card):
+    """`slot` was a field that looked configurable and was ignored — the code
+    always reached for 9c. A parameter that quietly does nothing is worse than
+    not offering it."""
+    from core.crypto.signing import PivSigner
+
+    PivSigner(pin="123456", slot="9a").sign(b"payload")
+    assert card.last_slot == 0x9A
+
+    PivSigner(pin="123456", slot="9c").sign(b"payload")
+    assert card.last_slot == 0x9C
+
+
+def test_a_slot_this_does_not_sign_with_is_refused(card):
+    from core.crypto.signing import PivSigner, SigningError
+
+    with pytest.raises(SigningError, match="9c"):
+        PivSigner(pin="123456", slot="9e").sign(b"payload")

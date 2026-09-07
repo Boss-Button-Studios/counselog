@@ -28,16 +28,18 @@ from core.crypto import PivSigner, SignerUnavailable, SigningError
 from laptop.unlock import FACTOR_CHOICES, open_database
 
 
-def build_signer(pin: str) -> PivSigner:
+def build_signer(pin: str, slot: str = "9c") -> PivSigner:
     """The real thing. Replaced in tests, never in normal use."""
-    return PivSigner(pin=pin)
+    return PivSigner(pin=pin, slot=slot)
 
 
 @click.command("sign")
 @click.option("--label", default=None,
               help="What to call this key in the record, e.g. 'work laptop'.")
+@click.option("--slot", type=click.Choice(["9c", "9a"]), default="9c",
+              show_default=True, help="Which PIV slot holds the signing key.")
 @click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None)
-def sign(label: str | None, unlock_with: str | None) -> None:
+def sign(label: str | None, slot: str, unlock_with: str | None) -> None:
     """Sign the record as it stands, with the key on your YubiKey.
 
     One signature covers everything written so far, so this is one PIN per
@@ -59,7 +61,7 @@ def sign(label: str | None, unlock_with: str | None) -> None:
         pin = click.prompt("YubiKey PIN", hide_input=True)
 
         try:
-            recorded = signatures.sign_head(conn, build_signer(pin), label=label)
+            recorded = signatures.sign_head(conn, build_signer(pin, slot), label=label)
         except SignerUnavailable as exc:
             raise click.ClickException(str(exc)) from exc
         except SigningError as exc:
@@ -145,7 +147,13 @@ def sign_request(path: Path, unlock_with: str | None) -> None:
 @click.argument("out_path", type=click.Path(dir_okay=False, writable=True,
                                             path_type=Path))
 @click.option("--label", default=None, help="What to call this key in the record.")
-def sign_offline(request_path: Path, out_path: Path, label: str | None) -> None:
+@click.option("--slot", type=click.Choice(["9c", "9a"]), default="9c",
+              show_default=True,
+              help="Which PIV slot holds the signing key. 9c asks for the PIN "
+                   "every time; 9a asks once per session, and is what the "
+                   "manager GUI offers first.")
+def sign_offline(request_path: Path, out_path: Path, label: str | None,
+                 slot: str) -> None:
     """Sign a request with your YubiKey, on a machine with no record on it.
 
     Needs no database, no passphrase and no notes — only the key. That is the
@@ -158,11 +166,11 @@ def sign_offline(request_path: Path, out_path: Path, label: str | None) -> None:
         raise click.ClickException(str(exc)) from exc
 
     click.echo(f"Signing {request.seq} entr{'y' if request.seq == 1 else 'ies'} "
-               f"of a record, at {request.entry_hash[:16]}…")
+               f"of a record, at {request.entry_hash[:16]}… with slot {slot}.")
     pin = click.prompt("YubiKey PIN", hide_input=True)
 
     try:
-        signed = signatures.sign_request(request, build_signer(pin))
+        signed = signatures.sign_request(request, build_signer(pin, slot))
     except (SignerUnavailable, SigningError, signatures.SignatureError) as exc:
         raise click.ClickException(str(exc)) from exc
 

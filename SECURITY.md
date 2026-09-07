@@ -134,8 +134,10 @@ A tombstoned note is reported as no longer checkable rather than quietly passing
 
 ECDSA P-256 over SHA-256, covering a domain-separated, length-prefixed payload of
 the format version, the chain position, the head's `entry_hash`, and the time of
-signing. On the laptop the key lives in the YubiKey's PIV slot 9c: generated
-on-device, non-extractable, PIN required for every operation. The public half is
+signing. On the laptop the key lives in a YubiKey PIV slot: generated on-device
+and non-extractable either way. **Slot 9c asks for the PIN on every operation;
+slot 9a asks once per session** — 9a is what the manager GUI offers first, and it
+works, but "PIN for every signature" is a claim about 9c alone. The public half is
 stored in the record, so a copy of the database can be verified by someone
 holding nothing else.
 

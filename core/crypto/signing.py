@@ -185,15 +185,15 @@ def _card_errors(doing: str):
     except BadResponseError as exc:
         raise SigningError(
             f"The YubiKey answered in a way this could not read, trying to "
-            f"{doing}. If slot 9c has no certificate in it, generate one — the "
-            "public key is read from there.") from exc
+            f"{doing}. If that slot has no certificate in it, generate one — "
+            "the public key is read from there.") from exc
     except NotSupportedError as exc:
         raise SigningError(f"This YubiKey cannot {doing}: {exc}") from exc
     except ApduError as exc:
         raise SigningError(
             f"The YubiKey refused to {doing} (card status 0x{exc.sw:04x}). If "
-            "slot 9c is empty, or holds a key that is not ECCP256, generate it "
-            "again with that algorithm.") from exc
+            "that slot is empty, or holds a key that is not ECCP256, generate "
+            "it again with that algorithm.") from exc
 
 
 @dataclass
@@ -222,7 +222,30 @@ class PivSigner:
     """
 
     pin: str
-    slot: str = "9c"  # PIV "digital signature": PIN required for every operation
+    # Which PIV slot holds the signing key. 9c is "Digital Signature" and asks
+    # for the PIN on every operation; 9a is "Authentication" and asks once per
+    # session, which is why the manager GUI offers it first. Both work here, and
+    # the difference is stated rather than hidden: with 9a, one PIN entry can
+    # sign more than once, so SECURITY.md's "PIN for every operation" is a claim
+    # about 9c alone.
+    #
+    # This used to be a field that looked configurable and was ignored — the
+    # code hardcoded 9c — which is worse than not offering the choice at all.
+    slot: str = "9c"
+
+    SLOTS = {"9a": "AUTHENTICATION", "9c": "SIGNATURE"}
+
+    def _slot(self):
+        """Resolve the configured slot, refusing one this has no business using."""
+        from yubikit.piv import SLOT
+
+        name = self.SLOTS.get(str(self.slot).lower().lstrip("0x"))
+        if name is None:
+            raise SigningError(
+                f"Slot {self.slot!r} is not one this signs with. Use 9c (digital "
+                "signature, PIN every time) or 9a (authentication, PIN once per "
+                "session).")
+        return getattr(SLOT, name)
 
     def _session(self):
         try:
@@ -254,21 +277,20 @@ class PivSigner:
         a slot through the manager GUI defaults to RSA, so a key of the wrong
         type is the most likely thing to be sitting there.
         """
-        from yubikit.piv import SLOT
-
-        with _card_errors("read the certificate in slot 9c"):
-            certificate = self._session().get_certificate(SLOT.SIGNATURE)
+        with _card_errors(f"read the certificate in slot {self.slot}"):
+            certificate = self._session().get_certificate(self._slot())
 
         public = certificate.public_key()
         if not isinstance(public, ec.EllipticCurvePublicKey):
             raise SigningError(
-                f"The key in slot 9c is {type(public).__name__.replace('PublicKey', '')}, "
+                f"The key in slot {self.slot} is "
+                f"{type(public).__name__.replace('PublicKey', '')}, "
                 "and Counselog signs with ECDSA P-256. Generate the slot again "
                 "choosing ECCP256 — in the manager GUI it is the algorithm "
                 "dropdown, which defaults to RSA.")
         if not isinstance(public.curve, ec.SECP256R1):
             raise SigningError(
-                f"The key in slot 9c is on curve {public.curve.name}, and "
+                f"The key in slot {self.slot} is on curve {public.curve.name}, and "
                 "Counselog signs with P-256 (ECCP256). Generate the slot again.")
 
         return public.public_bytes(
@@ -292,11 +314,11 @@ class PivSigner:
         signature it returns verifies with `ec.ECDSA(SHA256)` over the message,
         which is exactly what `verify_signature` does.
         """
-        from yubikit.piv import SLOT, KEY_TYPE
+        from yubikit.piv import KEY_TYPE
 
         session = self._session()
         with _card_errors("verify the PIN"):
             session.verify_pin(self.pin)
-        with _card_errors("sign with the key in slot 9c"):
-            return session.sign(SLOT.SIGNATURE, KEY_TYPE.ECCP256, payload,
+        with _card_errors(f"sign with the key in slot {self.slot}"):
+            return session.sign(self._slot(), KEY_TYPE.ECCP256, payload,
                                 hashes.SHA256())
