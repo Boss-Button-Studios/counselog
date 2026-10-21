@@ -26,7 +26,7 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
 | Phase 6 — The browser interface | ✅ Complete (567 tests, 91% cov) | desktop |
-| Phase 7 — PIV signing | 🟨 Parts 1–5 built; real-key run pending | **laptop — needs the YubiKey** |
+| Phase 7 — PIV signing | ✅ Complete — first hardware signature 2026-10-21 | laptop — needs the YubiKey |
 | Phase 8 — Harden + docs | 🟨 `SECURITY.md` done | both |
 
 Phases 0–6 are buildable entirely on the desktop. Only phase 7 needs the laptop,
@@ -986,7 +986,7 @@ running service is enough to break it. The 500 was the right behaviour: had
 Jinja rendered the missing variable as empty, the page would have quietly
 dropped its "who vouched for this" section and looked fully checked.
 
-## Phase 7 — PIV signing *(laptop)* 🟨
+## Phase 7 — PIV signing *(laptop)* ✅
 
 `core/crypto/signing.py`, `core/signatures.py`, schema version 6.
 
@@ -1119,13 +1119,23 @@ difference is stated rather than buried: 9c asks for the PIN on every operation,
 9a once per session. Both are on-device and non-extractable; only the PIN policy
 differs, and SECURITY.md now says which slot its claim belongs to.
 
-### Still to do — needs the laptop
+### Part 6 — the first signature by a key that cannot be copied ✅
 
-The custody claim is still untested: no signature in this project has yet been
-made by a key that cannot be copied. Before it is trusted: the setup checklist
-below, `ykman piv keys generate 9c`, a certificate in the slot for
-`get_certificate` to return, then `counselog sign` for real. The API contract is
-now verified against the package source; what remains is the hardware.
+2026-10-21. The custody claim is no longer untested. The key was generated on
+the YubiKey, which never touched the desktop holding the record: `sign-request`
+here, `sign-offline` on the laptop, `sign-attach` back here, the two files
+carried by hand and kept outside the repo. `verify` then reported:
+
+    All 5 notes are unaltered since they were written.
+    Signed up to entry 5 of 5.
+
+That is part 4's design working as intended, end to end, on real hardware —
+only a hash crossed between the machines.
+
+Noticed while reading that output: `verify` says *how far* the record is signed
+but not *by which key*. With one key that is the same thing; once a second
+device signs (allowed, by design), "signed" alone stops answering "by whom".
+Small, and recorded rather than done.
 
 ### Laptop setup checklist
 
