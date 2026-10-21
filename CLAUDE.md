@@ -109,10 +109,21 @@ Two machines. They are not interchangeable.
 | Machine | Role | Holds |
 |---|---|---|
 | **Laptop** | Capture, storage, reading. Source of truth. | The DEK (unlocked by YubiKey or password), the primary DB, the YubiKey |
-| **Desktop** (headless, no GPU) | LLM inference: bin tagging, report generation | An encrypted mirror it can only read *while the laptop has handed it the DEK for the session* |
+| **Desktop** (headless, Radeon VII 16 GB) | LLM inference: bin tagging, report generation | An encrypted mirror it can only read *while the laptop has handed it the DEK for the session* |
 
 The desktop never stores key material. Reboot it and its mirror is inert
 ciphertext. This is deliberate — see `SECURITY.md`.
+
+The desktop has no USB-C port, so the YubiKey never touches it. Signing a
+record held there goes through `sign-request` / `sign-offline` / `sign-attach`
+(phase 7), and only a hash crosses between the machines.
+
+**The GPU is shared, and nothing arbitrates it.** Ollama and the llama.cpp
+router (`~/llm/serve.sh`, port 8085, one model at a time) both load onto it over
+Vulkan without knowing about each other, and `~/llm/gaming-mode on` empties it
+for games. A bench run, or tagging, can find the GPU full. Run bench scripts one
+at a time. Ollama does not use ROCm on this card (gfx906 is unsupported); it
+falls back to Vulkan and is measured slower there than llama.cpp.
 
 ## Stack
 
@@ -124,7 +135,7 @@ ciphertext. This is deliberate — see `SECURITY.md`.
 | Storage | SQLCipher 4.12 via `sqlcipher3` |
 | Crypto | `cryptography` — AES-256-GCM, HKDF, scrypt, ECDSA, X.509 |
 | YubiKey | `yubikey-manager`, **laptop only** (`pip install -e ".[yubikey]"`) |
-| LLM | Ollama on the desktop, schema-constrained `/api/chat` |
+| LLM | Ollama on the desktop, schema-constrained `/api/chat` — what ships. llama.cpp (OpenAI-compatible, `response_format`) is benchmarked in `bench/` and is the likely successor; see `tasks.md`, "Re-measuring binning" |
 
 Five core dependencies. `yubikey-manager` is an extra because the desktop has no
 key, and because `pyscard` has no Linux wheels — it needs `swig` and
@@ -150,3 +161,8 @@ key, and because `pyscard` has no Linux wheels — it needs `swig` and
   takes minutes, needs Ollama, or seeds a fictitious record belongs there —
   scripts that measured something and were then thrown away are why the
   directory exists.
+- A bench script that needs a heavy dependency (PyTorch, for Laya) runs from a
+  venv of its own outside the repo, never Counselog's `.venv`. Measuring a
+  candidate must not quietly make it a dependency (Law 9). Code that comes with
+  model weights gets read in full before it runs, and the weights get checked
+  against the published hash.
