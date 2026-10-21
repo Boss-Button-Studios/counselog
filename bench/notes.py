@@ -40,6 +40,25 @@ LABELLED: list[tuple[set[str], str]] = [
 ]
 
 
+
+
+def cases(which: str) -> list[tuple[set[str], str, bool]]:
+    """A labelled set as (expected bins, note text, whether the label is arguable).
+
+    `which` is "labelled" for the six above, "pmo" for `bench/pmo.py`'s
+    thirty-two, or "all" for both. One loader for every scorer, so two scripts
+    compared on "the same notes" really are.
+    """
+    if which == "all":
+        return cases("labelled") + cases("pmo")
+    if which == "pmo":
+        from bench import pmo
+        return [(note.expected, note.text, note.arguable) for note in pmo.load()]
+    if which == "labelled":
+        return [(expected, text, False) for expected, text in LABELLED]
+    raise ValueError(f"no labelled set called {which!r}")
+
+
 # ── the fictitious record ────────────────────────────────────────────────────
 
 PEOPLE = [

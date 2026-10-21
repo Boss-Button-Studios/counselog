@@ -10,48 +10,80 @@ to the answers is included in the score, and the first note is asked again at
 the end to see whether it held.
 
     PYTHONPATH=. .venv/bin/python bench/model_accuracy.py
+    PYTHONPATH=. .venv/bin/python bench/model_accuracy.py --set pmo --shipping-only \
+        --backend llamacpp --model gpt-oss-20b
 
-About twenty minutes per shape on the reference desktop.
+`--set pmo` uses the thirty-two PMO notes in `bench/pmo.py` instead. Those are
+nearly all negatives, so the number to watch there is how often the model says
+yes to a note about one person. Arguable labels are scored apart, because a
+model disagreeing with an arguable label has not necessarily got it wrong.
+
+Timings vary by an order of magnitude between models and machines; the script
+prints them per note rather than promising one here.
 """
 
 from __future__ import annotations
 
 import sys
 
-from bench.harness import SHAPES, ModelUnavailable, ask, shown
-from bench.notes import LABELLED
+from bench.harness import ModelUnavailable, arguments, ask, shapes, shown
+from bench.notes import cases
 
 
-def run(label: str, template: str) -> tuple[int, bool]:
+def run(label: str, template: str, notes, **how) -> str:
     print(f"\n=== {label} ===", flush=True)
-    right = 0
-    for index, (expected, text) in enumerate(LABELLED, start=1):
-        bins, _, seconds = ask(text, template)
+    firm = [n for n in notes if not n[2]]
+    right = agreed = false_yes = 0
+    total_seconds = 0.0
+    for index, (expected, text, arguable) in enumerate(notes, start=1):
+        bins, _, seconds = ask(text, template, **how)
+        total_seconds += seconds
         correct = bins == expected
-        right += correct
-        print(f"  {index}. want {shown(expected):8} got {shown(bins):8} "
-              f"{'ok' if correct else 'MISS'}  ({seconds:.0f}s)", flush=True)
+        if arguable:
+            agreed += correct
+            verdict = "agrees" if correct else "differs (arguable)"
+        else:
+            right += correct
+            verdict = "ok" if correct else "MISS"
+            # The failure phase 4 found: a yes on a note that is about one
+            # person. Counted on its own because it is the one that costs.
+            false_yes += not expected and bool(bins)
+        print(f"  {index:2}. want {shown(expected):8} got {shown(bins):8} "
+              f"{verdict}  ({seconds:.0f}s)", flush=True)
 
-    repeated, _, seconds = ask(LABELLED[0][1], template)
-    held = repeated == LABELLED[0][0]
+    repeated, _, seconds = ask(notes[0][1], template, **how)
+    held = repeated == notes[0][0]
     print(f"  note 1 asked again at the end: {shown(repeated)} "
           f"{'(same)' if held else '(CHANGED)'}  ({seconds:.0f}s)", flush=True)
-    print(f"  {right}/{len(LABELLED)} correct, "
-          f"{'held its answer' if held else 'DID NOT HOLD'}", flush=True)
-    return right, held
+
+    negatives = sum(1 for expected, _, _ in firm if not expected)
+    arguable_count = len(notes) - len(firm)
+    summary = (f"{right}/{len(firm)} correct, yes on {false_yes}/{negatives} "
+               f"one-person notes"
+               + (f", agreed on {agreed}/{arguable_count} arguable" if arguable_count else "")
+               + f", {total_seconds / len(notes):.0f}s/note, "
+               + ("held its answer" if held else "DID NOT HOLD"))
+    print(f"  {summary}", flush=True)
+    return summary
 
 
 def main() -> int:
+    options = arguments(__doc__.splitlines()[0],
+                        extra=lambda p: p.add_argument("--set", choices=("labelled", "pmo"),
+                                                       default="labelled"))
+    how = {"model": options.model, "backend": options.backend}
+    notes = cases(options.set)
+    print(f"{options.backend}: {options.model}, {len(notes)} notes from '{options.set}'")
     try:
-        results = {label: run(label, template) for label, template in SHAPES.items()}
+        results = {label: run(label, template, notes, **how)
+                   for label, template in shapes(options).items()}
     except ModelUnavailable as exc:
         print(f"\n{exc}", file=sys.stderr)
         return 2
 
     print("\n=== summary ===")
-    for label, (right, held) in results.items():
-        print(f"  {right}/{len(LABELLED)} correct, "
-              f"{'held' if held else 'CHANGED'}   {label}")
+    for label, summary in results.items():
+        print(f"  {label}: {summary}")
 
     print("\nA score is a measurement, not a pass mark. What it is for is "
           "comparing two shapes,\nor two models, on the same notes — a number "

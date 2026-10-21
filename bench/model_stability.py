@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import sys
 
-from bench.harness import SHAPES, ModelUnavailable, ask, shown
+from bench.harness import ModelUnavailable, arguments, ask, shapes, shown
 from bench.notes import LABELLED
 
 # One clearly about the writer, one clearly about the team: two answers that
@@ -27,11 +27,11 @@ A = LABELLED[0][1]
 B = LABELLED[2][1]
 
 
-def run(label: str, template: str) -> bool:
+def run(label: str, template: str, **how) -> bool:
     print(f"\n=== {label} ===", flush=True)
     answers = []
     for position, (name, text) in enumerate((("A", A), ("B", B), ("A again", A)), start=1):
-        bins, confidences, seconds = ask(text, template)
+        bins, confidences, seconds = ask(text, template, **how)
         answers.append(bins)
         print(f"  {position}. {name:8} -> {shown(bins):8} {confidences}  ({seconds:.0f}s)",
               flush=True)
@@ -43,9 +43,13 @@ def run(label: str, template: str) -> bool:
 
 
 def main() -> int:
+    options = arguments(__doc__.splitlines()[0])
+    how = {"model": options.model, "backend": options.backend}
+    print(f"{options.backend}: {options.model}")
     print("Note A, note B, note A again. A must answer the same both times.")
     try:
-        results = {label: run(label, template) for label, template in SHAPES.items()}
+        results = {label: run(label, template, **how)
+                   for label, template in shapes(options).items()}
     except ModelUnavailable as exc:
         print(f"\n{exc}", file=sys.stderr)
         return 2
@@ -56,7 +60,7 @@ def main() -> int:
 
     # The shipping shape going unstable is the finding worth a non-zero exit:
     # it is the one someone would want to notice from a script.
-    shipping = next(iter(SHAPES))
+    shipping = next(iter(results))
     return 0 if results[shipping] else 1
 
 

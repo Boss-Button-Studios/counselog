@@ -26,8 +26,8 @@ and recency). Everything else deferred until real notes exist to design against.
 | Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
 | Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
 | Phase 6 — The browser interface | ✅ Complete (567 tests, 91% cov) | desktop |
-| Phase 7 — PIV signing | ⬜ Not started | **laptop — needs the YubiKey** |
-| Phase 8 — Harden + docs | ⬜ Not started | both |
+| Phase 7 — PIV signing | 🟨 Parts 1–5 built; real-key run pending | **laptop — needs the YubiKey** |
+| Phase 8 — Harden + docs | 🟨 `SECURITY.md` done | both |
 
 Phases 0–6 are buildable entirely on the desktop. Only phase 7 needs the laptop,
 which is now the whole of what is left before hardening.
@@ -839,6 +839,29 @@ and is now `tags.decision_for`, where the report needed it too.
 
 Part 4 is complete, and with it phase 6. Everything left before hardening needs
 the laptop and the key in it.
+
+### Re-measuring binning on new hardware (2026-10-21) 🟨
+
+The desktop now has a Radeon VII (16 GB) and a llama.cpp router beside Ollama.
+`bench/` can ask either (`--backend`), and gained a 32-note PMO test set
+(`bench/data/pmo_notes.md`, fictitious, generated outside the project), a
+logprob classifier, and a Laya run in its own venv. Numbers and caveats are in
+`bench/README.md`; the short version:
+
+- **gemma4 12b on llama.cpp is ~50x faster than the shipping default** and no
+  less accurate on what we can measure: 68/70 at under 2 s a note, against
+  deepseek-r1:14b's 100–215 s on Ollama.
+- **No method yet makes review catch the mistakes that matter.** gemma is
+  confidently wrong; Laya is honestly uncertain but misses plain cases.
+- **The test set is the bottleneck, not the model.** Four firm positives in 38
+  notes. More self and team notes are needed before any of this decides a
+  default — and their labels are the record owner's call, not the tool's.
+
+Nothing in `desktop/tagger.py` has changed. Moving it to llama.cpp is a backend
+setting in `core/config` and a second request builder, and waits on the above.
+
+Open: the three ARGUABLE labels in `bench/pmo.py` (07-21, 07-23, 09-19) and
+09-23 ("thanked the whole team" — firm "neither", but every model says team).
 
 ### Backlog — wanted, not scheduled
 
