@@ -900,6 +900,42 @@ Raised while playtesting; recorded so they are not rediscovered later.
   so this is scope rather than an oversight — `core/reports` already works on
   any bin key, so it is a route and a heading when it is wanted.
 
+- **Learning from review.** Every review is already a labelled example:
+  `note_tags` rows with `decided_by = 'person'` and `decision` included or
+  excluded. Three levels, cheapest first, and none worth building until there
+  are real reviewed notes to fit:
+  1. *Calibration.* One temperature per question, fitted to past decisions so
+     that a confidence of 0.9 is right nine times in ten — the step Laya's card
+     says fixes its overconfidence, and it would tune gemma's logprobs the same
+     way. Plain arithmetic, no dependency, and it is what makes
+     `DEFAULT_THRESHOLD` mean something. A few dozen reviewed decisions.
+  2. *Examples in the prompt.* Show the model a handful of the owner's past
+     decisions with each new note. No training; costs prompt length.
+  3. *Fine-tuning.* Where Laya's accuracy jumps (0.36 → 0.77 on its own
+     benchmark). Hundreds of examples, and PyTorch in something that ships —
+     a Law 9 decision, not a bench one.
+
+  Two things have to be settled first:
+  - **Review currently destroys the data calibration needs.** `confirm_tag`
+    and `reject_tag` set `confidence` to NULL (`core/tags.py`), on purpose, so
+    a decision cannot be mistaken for a guess. But that discards the model's
+    number at exactly the moment it acquires a right answer to be scored
+    against. The fix is to keep the guess beside the decision — a column or a
+    history table, a schema migration either way — not to stop clearing it.
+  - **Labels only exist where the model said yes.** A no makes no tag, so it is
+    never reviewed, so a miss never becomes an example. Anything trained on
+    review alone learns from a biased sample. Some way to look at untagged
+    notes is needed, or the misses stay invisible to training as well as to
+    the reader.
+
+  And one constraint on all of it: **trained weights are sensitive data.** A
+  model fitted to the notes encodes something about them, so it needs the
+  DEK's protection — encrypted at rest, never left readable on the desktop,
+  whose mirror is meant to be inert ciphertext after a reboot. A handful of
+  temperatures (level 1) say little; fine-tuned weights (level 3) say much
+  more. Training is local only: Laya's own notebook runs on Kaggle, which
+  would send the notes off the machine (Law 2).
+
 ### Found while sorting a real record: `tag` could only be the laptop
 
 `counselog tag` and `counselog sync` always presented the `laptop` certificate,
