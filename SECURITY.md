@@ -297,13 +297,21 @@ pages alive regardless. Deletion here means "removed from the record", not
 
 Recorded because a threat model that lists only what is handled is marketing.
 
-- **`PivSigner` has never run against hardware.** It is written from the
-  documented API and is unverified until the laptop confirms it.
+- **Hardware signing has run once.** On 2026-10-21 a key generated on a
+  YubiKey signed the record through the offline flow (`sign-request` /
+  `sign-offline` / `sign-attach`), and `verify` accepted it. `counselog sign`,
+  on a machine holding both the record and the key, has not been run against
+  hardware; it uses the same `PivSigner`, but that is an inference, not a test.
 - **The desktop sees note text in memory** during a session. Local inference has
   no version of this that does not.
 - **Tagging is not reproducible.** The model's answer can depend on what was
   asked before it; the prompt ordering fixes the case that was measured, but a
   tag is a suggestion, not a fact, and low-confidence ones are held for review.
+- **A bin the model missed is never reviewed.** A no makes no tag, and review
+  only shows tags. Measured on fictitious notes, about half of what belongs in
+  `self` or `team` is missed this way (`bench/README.md`). Every answer is now
+  kept (schema 8, `core/judgements.py`), so the misses can be found; the
+  interface that shows them is not built yet (`tasks.md`, "the safety net").
 - **One user, one record.** No multi-tenancy, no sharing, no roles. Anyone who
   can unlock can do everything.
 - **No account recovery.** Deliberate.

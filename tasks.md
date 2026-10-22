@@ -941,7 +941,7 @@ Raised while playtesting; recorded so they are not rediscovered later.
      a Law 9 decision, not a bench one.
 
   Two things have to be settled first:
-  - **Review currently destroys the data calibration needs.** `confirm_tag`
+  - ✅ *Settled by the safety net, part 1 (schema 8).* **Review currently destroys the data calibration needs.** `confirm_tag`
     and `reject_tag` set `confidence` to NULL (`core/tags.py`), on purpose, so
     a decision cannot be mistaken for a guess. But that discards the model's
     number at exactly the moment it acquires a right answer to be scored
@@ -1251,7 +1251,7 @@ on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
 
-## The safety net: checking the sorting ⬜ *(scoped 2026-10-22, not started)*
+## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; part 1 done)*
 
 **Why.** Measured on 88 notes, every model finds only about half of what belongs
 in `self` or `team` (`bench/README.md`). A missed bin makes no tag, and review
@@ -1324,6 +1324,32 @@ output.
    that tells the owner whether a better model or a trainer is worth it. Shown
    on the digest pages for self and team, and only once the sample is big
    enough to mean something.
+
+### Part 1 — every answer is kept ✅ *(2026-10-22)*
+
+`core/judgements.py`, schema 8, service version 4.
+
+- `judge_self_team` returns both answers, with the confidence exactly as the
+  model gave it — None when unusable, never the fallback. The fallback is now
+  applied only in `sort_note`, where a yes becomes a tag and needs a number for
+  review. Storing the fallback would have recorded 0.5 for answers the model
+  never quantified, and anything later fitted to these rows would have learned
+  from a number nobody said.
+- `/tag` returns `judgements` and `method` beside `tags`. Version 4 is
+  *required*: a version 3 desktop sends no answers, and sorting against it
+  would quietly go back to losing every no.
+- `counselog tag` keeps them after `set_tags`, so a failure loses evidence
+  about the model and never a note's place in the reports.
+- Nothing is backfilled. A tag is only the yes half of an answer.
+- `tagger.METHOD` names the prompt; bump it whenever the prompt, schema or
+  request options change, or old and new answers get pooled.
+
+Found on the way, and fixed: every shape check in `core/` matched with a regex
+ending `$`, which in Python also accepts a trailing newline — `"team\n"` was a
+valid bin key, and a hand-carried signing file could carry a 65-character
+hash. Now `fullmatch` throughout (`protocol`, `detached`, `web/views/reports`).
+Also: valid JSON of the wrong shape from the model (a list, a string) reached
+`.get` and crashed; it is now reported as an unreadable answer.
 
 **Out of scope here:** any training or calibration (the backlog's three levels
 build on part 1's table), changing the model, and a privacy tier (decided

@@ -26,12 +26,14 @@ from desktop.sessions import NoSuchSession, SessionStore
 
 log = logging.getLogger("counselogd")
 
-# Bump whenever the set of endpoints changes. The laptop compares this against
+# Bump whenever the set of endpoints, or what one returns, changes. The laptop compares this against
 # what it needs, so a desktop still running older code says so plainly instead
 # of answering "No such endpoint" to a request it has never heard of.
 #   1: session, sync, mirror/status   (phase 3)
 #   2: + people, tag                  (phase 4)
-SERVICE_VERSION = 3
+#   3: sync carries corrections (supersedes)  (phase 6)
+#   4: tag also returns every self/team answer, yes and no, and the method
+SERVICE_VERSION = 4
 
 
 def _device() -> str:
@@ -203,6 +205,7 @@ def create_app(sessions: SessionStore | None = None) -> Flask:
                 conn.execute("SELECT id, display_name, aliases FROM people WHERE active = 1")
             )
             results: dict[str, list[dict]] = {}
+            answers: dict[str, list[dict]] = {}
             failed: dict[str, str] = {}
             for raw_id in note_ids:
                 if not isinstance(raw_id, int) or isinstance(raw_id, bool):
@@ -213,20 +216,28 @@ def create_app(sessions: SessionStore | None = None) -> Flask:
                 if row is None or row["tombstoned_at"] is not None:
                     continue  # nothing to read
                 try:
-                    tags = tagger.tag_note(row["raw_text"], people, model=model)
+                    sorting = tagger.sort_note(row["raw_text"], people, model=model)
                 except tagger.TaggingUnavailable as exc:
                     # Report and stop: every remaining note would fail the same
                     # way, and the laptop keeps whatever already succeeded.
                     failed[str(raw_id)] = str(exc)
                     break
                 results[str(raw_id)] = [
-                    {"bin": tag.bin_key, "confidence": tag.confidence} for tag in tags
+                    {"bin": tag.bin_key, "confidence": tag.confidence}
+                    for tag in sorting.tags
+                ]
+                # Every answer, the noes included, so the laptop can keep what
+                # the model said and not only what it filed (core.judgements).
+                answers[str(raw_id)] = [
+                    {"bin": j.bin_key, "said_yes": j.said_yes, "confidence": j.confidence}
+                    for j in sorting.judgements
                 ]
         finally:
             conn.close()
 
         log.info("tagged %s notes for %s", len(results), _device())
-        return jsonify(tags=results, failed=failed, model=model)
+        return jsonify(tags=results, judgements=answers, failed=failed, model=model,
+                       method=tagger.METHOD)
 
     @app.errorhandler(404)
     def not_found(_):

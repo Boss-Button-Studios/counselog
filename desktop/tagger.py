@@ -29,6 +29,7 @@ from typing import Iterable, Sequence
 import httpx
 
 from core import config
+from core.judgements import Judgement
 from core.sanitize import sanitize
 
 # Chosen by benchmark, not by reputation. On the reference desktop, across five
@@ -37,6 +38,12 @@ from core.sanitize import sanitize
 # were fast and wrong — biased toward answering yes to everything.
 DEFAULT_MODEL = "deepseek-r1:14b"
 DEFAULT_THRESHOLD = 0.75
+
+# Which way of asking produced an answer, recorded beside every answer kept
+# (`core.judgements`). Answers from different prompts are not comparable, so
+# anything fitted to them later has to be able to tell them apart. Change this
+# whenever PROMPT, SELF_TEAM_SCHEMA or the request options change.
+METHOD = "json-note-first-1"
 
 # What a model-assigned tag is worth when the model gives no usable number.
 # Deliberately below the threshold: an unquantified guess should be reviewed.
@@ -135,8 +142,13 @@ def judge_self_team(
     url: str | None = None,
     timeout: float = 300.0,
     client: "httpx.Client | None" = None,
-) -> list[Tag]:
+) -> list[Judgement]:
     """Ask the model the one question aliases cannot answer.
+
+    Returns its answer for **both** bins, yes or no, with the confidence exactly
+    as the model gave it (None if unusable). Only `sort_note` turns these into
+    tags. A no used to be dropped here, which made a missed bin impossible to
+    find afterwards — half of them, measured on the PMO set (`bench/README.md`).
 
     Temperature zero and a fixed seed, asking for repeatability: a
     probabilistic step in an otherwise deterministic pipeline should at least
@@ -219,55 +231,71 @@ def judge_self_team(
     except (KeyError, ValueError, TypeError) as exc:
         raise TaggingUnavailable("The language model's answer could not be read.") from exc
 
-    tags: list[Tag] = []
-    for bin_key in ("self", "team"):
-        if not answer.get(bin_key):
-            continue
-        tags.append(Tag(bin_key=bin_key,
-                        confidence=_confidence(answer.get(f"{bin_key}_confidence")),
-                        matched_by="model"))
-    return tags
+    if not isinstance(answer, dict):
+        raise TaggingUnavailable("The language model's answer could not be read.")
+    return [Judgement(bin_key=bin_key, said_yes=answer.get(bin_key) is True,
+                      confidence=_usable(answer.get(f"{bin_key}_confidence")))
+            for bin_key in ("self", "team")]
+
+
+def _usable(raw: object) -> float | None:
+    """The model's confidence if it makes sense, otherwise None.
+
+    A model that returns 7 or -1 has misunderstood the question. None, not a
+    guess, so a record of what the model said never contains a number it did
+    not say.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    value = float(raw)
+    return value if 0.0 <= value <= 1.0 else None
 
 
 def _confidence(raw: object) -> float:
-    """Read a confidence, refusing to trust a number that makes no sense.
+    """A confidence fit for deciding review, falling back low when unusable.
 
-    A model that returns 7 or -1 has misunderstood the question, and treating
-    that as certainty would auto-accept a tag nobody checked.
+    Treating a nonsense number as certainty would auto-accept a tag nobody
+    checked, so an unusable one lands below the threshold instead.
     """
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return FALLBACK_CONFIDENCE
-    value = float(raw)
-    if not 0.0 <= value <= 1.0:
-        return FALLBACK_CONFIDENCE
-    return value
+    value = _usable(raw)
+    return FALLBACK_CONFIDENCE if value is None else value
 
 
-def tag_note(
+@dataclass(frozen=True)
+class Sorting:
+    """What sorting one note found: the tags to file it under, and every answer
+    the model gave on the way, kept so a no can be checked later."""
+
+    tags: list[Tag]
+    judgements: list[Judgement]
+
+
+def sort_note(
     text: str,
     people: Sequence[KnownPerson],
     *,
     model: str = DEFAULT_MODEL,
     use_model: bool = True,
     **kwargs,
-) -> list[Tag]:
-    """Tag one note: aliases always, the model for self and team.
+) -> Sorting:
+    """Sort one note: aliases always, the model for self and team.
 
     The model runs even when aliases matched. A note can name someone *and* be
     about the team, and skipping the second question whenever a name appeared
     would silently lose that.
 
-    If the model is unavailable the alias tags still stand. Half a result beats
-    refusing to record what was certain (Law 6).
+    If the model is unavailable this raises, and the caller decides whether the
+    alias tags alone are worth keeping. The service reports it and stops, since
+    every later note would fail the same way.
     """
     tags = match_aliases(text, people)
     if not use_model:
-        return tags
-    try:
-        tags.extend(judge_self_team(text, model=model, **kwargs))
-    except TaggingUnavailable:
-        raise
-    return tags
+        return Sorting(tags=tags, judgements=[])
+    judgements = judge_self_team(text, model=model, **kwargs)
+    tags.extend(Tag(bin_key=j.bin_key, confidence=_confidence(j.confidence),
+                    matched_by="model")
+                for j in judgements if j.said_yes)
+    return Sorting(tags=tags, judgements=judgements)
 
 
 def people_from_rows(rows: Iterable) -> list[KnownPerson]:

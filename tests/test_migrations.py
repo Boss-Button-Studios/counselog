@@ -35,6 +35,10 @@ def _rewind_to(path, version: int) -> None:
     """Turn a current database into what `version` would have left behind."""
     conn = _raw(path)
     try:
+        if version < 8:
+            conn.execute("DROP TRIGGER model_judgements_immutable")
+            conn.execute("DROP TRIGGER model_judgements_undeletable")
+            conn.execute("DROP TABLE model_judgements")
         if version < 7:
             conn.execute("DROP TABLE problems")
         if version < 6:
@@ -150,6 +154,7 @@ def with_a_note(path):
     (4, "who decided a tag"),
     (5, "somewhere to keep a signing key"),
     (6, "somewhere to note what went wrong"),
+    (7, "somewhere to keep the model's answers"),
 ])
 def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version,
                                                             missing):
@@ -162,7 +167,7 @@ def test_an_older_database_is_brought_up_to_date_on_connect(with_a_note, version
         conn.close()
 
 
-@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6])
+@pytest.mark.parametrize("version", [1, 2, 3, 4, 5, 6, 7])
 def test_the_notes_survive_the_migration(with_a_note, version):
     """The whole point. A migration that loses a note is worse than no tool.
 
@@ -266,6 +271,46 @@ def test_problems_can_be_recorded_after_coming_forward(with_a_note):
     try:
         problems.record(conn, "abc123", endpoint="verify_record", kind="RuntimeError")
         assert [p.reference for p in problems.recent(conn)] == ["abc123"]
+    finally:
+        conn.close()
+
+
+def test_answers_can_be_kept_after_coming_forward_and_not_edited(with_a_note):
+    """Schema 8. The table must accept answers, and refuse edits and deletes,
+    on a database that arrived at version 8 by migrating rather than by being
+    created — the two paths write the triggers separately."""
+    from core import judgements
+    _rewind_to(with_a_note, 7)
+    conn = db.connect(with_a_note, KEY)
+    try:
+        note_id = models.list_notes(conn)[0].id
+        judgements.record(conn, note_id, [judgements.Judgement("self", False, 0.8),
+                                          judgements.Judgement("team", True, None)],
+                          model="m", method="json-note-first-1")
+        assert [(j.bin_key, j.said_yes, j.confidence)
+                for j in judgements.for_note(conn, note_id)] == [
+            ("self", False, 0.8), ("team", True, None)]
+        with pytest.raises(sqlcipher3.IntegrityError, match="cannot be edited"):
+            conn.execute("UPDATE model_judgements SET said_yes = 1")
+        with pytest.raises(sqlcipher3.IntegrityError, match="cannot be deleted"):
+            conn.execute("DELETE FROM model_judgements")
+    finally:
+        conn.close()
+
+
+def test_existing_tags_are_untouched_by_schema_8(with_a_note):
+    """Nothing is backfilled: the answers before schema 8 were never kept, and
+    a tag is not an answer — it is only the yes half of one."""
+    conn = db.connect(with_a_note, KEY)
+    note_id = models.list_notes(conn)[0].id
+    tags.set_tags(conn, note_id, [("team", 0.6)])
+    conn.close()
+
+    _rewind_to(with_a_note, 7)
+    conn = db.connect(with_a_note, KEY)
+    try:
+        assert tags.tags_for_note(conn, note_id) == [("team", 0.6)]
+        assert conn.execute("SELECT count(*) FROM model_judgements").fetchone()[0] == 0
     finally:
         conn.close()
 

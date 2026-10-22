@@ -200,10 +200,12 @@ def test_a_position_that_is_not_a_position_is_refused(seq):
         detached.read_request(text)
 
 
-@pytest.mark.parametrize("value", ["", "z" * 64, "AB" * 32, "a" * 63, 12, None])
+@pytest.mark.parametrize("value", ["", "z" * 64, "AB" * 32, "a" * 63, 12, None,
+                                   "a" * 64 + "\n"])
 def test_a_hash_that_is_not_a_hash_is_refused(value):
     """Uppercase hex is refused too: this program writes lowercase, so anything
-    else did not come from it."""
+    else did not come from it. A trailing newline is refused because a regex
+    `$` lets one through, which `match` did until 2026-10-22."""
     text = json.dumps({"format": detached.REQUEST_MARKER, "format_version": 1,
                        "signed_version": 1, "seq": 1, "entry_hash": value})
     with pytest.raises(detached.DetachedError, match="not a hash"):

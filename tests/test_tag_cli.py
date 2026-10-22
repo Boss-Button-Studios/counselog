@@ -19,7 +19,7 @@ from desktop import tagger
 from desktop.__main__ import MutualTLSRequestHandler
 from desktop.service import create_app
 from desktop.sessions import SessionStore
-from desktop.tagger import Tag
+from core.judgements import Judgement
 from laptop.cli import cli
 
 PASSWORD = "swordfish"
@@ -125,7 +125,7 @@ def test_a_named_person_is_tagged(ready, monkeypatch):
 
 def test_a_model_guess_shows_its_confidence(ready, monkeypatch):
     monkeypatch.setattr(tagger, "judge_self_team",
-                        lambda text, **kw: [Tag("team", 0.85, "model")])
+                        lambda text, **kw: [Judgement("team", True, 0.85)])
     _note(ready, "The group is finally talking to each other.")
     assert "85% sure" in _tag(ready).output
 
@@ -146,7 +146,7 @@ def test_results_are_saved_as_they_arrive(ready, monkeypatch):
         calls["n"] += 1
         if calls["n"] > 1:
             raise tagger.TaggingUnavailable("the model went away")
-        return [Tag("self", 0.9, "model")]
+        return [Judgement("self", True, 0.9)]
 
     monkeypatch.setattr(tagger, "judge_self_team", flaky)
     _note(ready, "first note")
@@ -208,7 +208,7 @@ def test_an_unreachable_desktop_is_reported(ready, monkeypatch):
 
 def test_review_shows_only_uncertain_guesses(ready, monkeypatch):
     monkeypatch.setattr(tagger, "judge_self_team",
-                        lambda text, **kw: [Tag("team", 0.4, "model")])
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
     _note(ready, "Sarah was in the retro.")
     _tag(ready)
 
@@ -219,7 +219,7 @@ def test_review_shows_only_uncertain_guesses(ready, monkeypatch):
 
 def test_keeping_a_guess_settles_it(ready, monkeypatch):
     monkeypatch.setattr(tagger, "judge_self_team",
-                        lambda text, **kw: [Tag("team", 0.4, "model")])
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
     _note(ready, "a note")
     _tag(ready)
     ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\ny\n")
@@ -236,7 +236,7 @@ def test_keeping_a_guess_settles_it(ready, monkeypatch):
 
 def test_rejecting_a_guess_removes_it(ready, monkeypatch):
     monkeypatch.setattr(tagger, "judge_self_team",
-                        lambda text, **kw: [Tag("team", 0.4, "model")])
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
     _note(ready, "a note")
     _tag(ready)
     ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\nn\n")
@@ -251,7 +251,7 @@ def test_rejecting_a_guess_removes_it(ready, monkeypatch):
 def test_review_can_be_stopped_part_way(ready, monkeypatch):
     """Quitting must keep the answers already given and leave the rest."""
     monkeypatch.setattr(tagger, "judge_self_team",
-                        lambda text, **kw: [Tag("team", 0.4, "model")])
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
     _note(ready, "first")
     _note(ready, "second")
     _tag(ready)
@@ -312,3 +312,50 @@ def test_notes_that_matched_are_not_flagged(ready, monkeypatch):
     monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
     _note(ready, "Sarah was there.")
     assert "no bin at all" not in _tag(ready).output
+
+
+# ── keeping every answer (schema 8) ──────────────────────────────────────────
+
+
+def test_every_answer_is_kept_including_the_no(ready, monkeypatch):
+    """The safety net's first part. A no files no tag, so before schema 8 it
+    left no trace and a missed bin could never be found again."""
+    from core import judgements
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [
+        Judgement("self", False, 0.8), Judgement("team", True, 0.85)])
+    _note(ready, "The group is finally talking to each other.")
+    assert _tag(ready).exit_code == 0
+
+    with _open() as conn:
+        kept = judgements.for_note(conn, 1)
+        assert [(j.bin_key, j.said_yes, j.confidence) for j in kept] == [
+            ("self", False, 0.8), ("team", True, 0.85)]
+        assert {j.model for j in kept} == {tagger.DEFAULT_MODEL}
+        assert {j.method for j in kept} == {tagger.METHOD}
+        # Only the yes is filed.
+        assert dict(tags.tags_for_note(conn, 1)) == {"team": 0.85}
+
+
+def test_a_name_match_alone_keeps_no_answers(ready, monkeypatch):
+    """An alias is not the model's answer, and nothing should claim it was."""
+    from core import judgements
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    _note(ready, "Sarah pushed back on the timeline.")
+    _tag(ready)
+    with _open() as conn:
+        assert judgements.for_note(conn, 1) == []
+        assert dict(tags.tags_for_note(conn, 1)) == {"person:1": None}
+
+
+def test_an_older_desktop_is_refused_before_any_note_is_sent(ready, monkeypatch):
+    """A desktop on service version 3 sends no answers. Sorting against it
+    would quietly go back to losing every no, so it is refused up front."""
+    from desktop import service
+    monkeypatch.setattr(service, "SERVICE_VERSION", 3)
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [])
+    _note(ready, "a note")
+    result = _tag(ready)
+    assert result.exit_code != 0
+    assert "restart" in result.output.lower() or "version" in result.output.lower()
+    with _open() as conn:
+        assert models.unprocessed_notes(conn) != []

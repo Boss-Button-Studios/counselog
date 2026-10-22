@@ -79,7 +79,8 @@ def test_the_limits_of_the_record_are_still_stated(text, claim):
 @pytest.mark.parametrize("claim", [
     "outside the encryption boundary",
     "Erasure cannot be guaranteed",
-    "never run against hardware",
+    "has not been run against",
+    "A bin the model missed is never reviewed",
     "sees note text in memory",
 ])
 def test_the_known_gaps_are_still_admitted(text, claim):

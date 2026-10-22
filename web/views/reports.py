@@ -89,7 +89,7 @@ def _as_date(typed: str) -> date | None:
     typed = (typed or "").strip()
     if not typed:
         return None
-    if not PLAIN_DATE.match(typed):
+    if not PLAIN_DATE.fullmatch(typed):
         raise BadDate(typed)
     try:
         return date.fromisoformat(typed)

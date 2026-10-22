@@ -20,7 +20,7 @@ from typing import Iterator
 
 import sqlcipher3
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class DatabaseError(Exception):
@@ -269,6 +269,40 @@ CREATE TABLE problems (
     endpoint    TEXT,               -- our own route name, never the raw path
     kind        TEXT NOT NULL       -- the exception's class name, never its message
 );
+
+-- Every answer the model gave about self and team, yes AND no, one row per bin
+-- per sorting run (schema 8).
+--
+-- `note_tags` is the current state — what the reports read — and it only ever
+-- holds a yes. That is right for reading and wrong for checking: a no makes no
+-- tag, so a bin the model missed is invisible, and when a person confirms or
+-- rejects a guess the guess is cleared so it cannot be mistaken for a decision.
+-- This table keeps what the model actually said, so the misses can be found
+-- and a later calibration has something honest to fit against.
+--
+-- No note text, only ids and numbers. `confidence` is NULL when the model gave
+-- no usable number, rather than the fallback the tagger substitutes for
+-- review: recording a value the model never gave would poison anything later
+-- fitted to these rows. `model` and `method` say which model and which way of
+-- asking, because answers from different ones are not comparable.
+CREATE TABLE model_judgements (
+    id         INTEGER PRIMARY KEY,
+    note_id    INTEGER NOT NULL REFERENCES notes(id),
+    bin_key    TEXT NOT NULL CHECK (bin_key IN ('self', 'team')),
+    said_yes   INTEGER NOT NULL CHECK (said_yes IN (0, 1)),
+    confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+    model      TEXT NOT NULL,
+    method     TEXT NOT NULL,
+    judged_at  TEXT NOT NULL
+);
+CREATE INDEX model_judgements_by_note ON model_judgements(note_id, bin_key);
+
+-- Append-only, like the chain: an answer that could be edited afterwards is no
+-- measure of the model that gave it.
+CREATE TRIGGER model_judgements_immutable BEFORE UPDATE ON model_judgements
+BEGIN SELECT RAISE(ABORT, 'model judgements cannot be edited'); END;
+CREATE TRIGGER model_judgements_undeletable BEFORE DELETE ON model_judgements
+BEGIN SELECT RAISE(ABORT, 'model judgements cannot be deleted'); END;
 """
 
 
@@ -277,6 +311,27 @@ CREATE TABLE problems (
 # chain — altering a hashed field during a migration would make every note after
 # it look tampered with.
 MIGRATIONS: dict[int, tuple[str, ...]] = {
+    8: (
+        # Nothing to backfill: the answers before this were never kept, and
+        # inventing them from `note_tags` would record noes as absent and
+        # yeses at a confidence the tagger may have substituted.
+        """CREATE TABLE model_judgements (
+               id         INTEGER PRIMARY KEY,
+               note_id    INTEGER NOT NULL REFERENCES notes(id),
+               bin_key    TEXT NOT NULL CHECK (bin_key IN ('self', 'team')),
+               said_yes   INTEGER NOT NULL CHECK (said_yes IN (0, 1)),
+               confidence REAL CHECK (confidence IS NULL OR
+                                      (confidence >= 0 AND confidence <= 1)),
+               model      TEXT NOT NULL,
+               method     TEXT NOT NULL,
+               judged_at  TEXT NOT NULL
+           )""",
+        "CREATE INDEX model_judgements_by_note ON model_judgements(note_id, bin_key)",
+        """CREATE TRIGGER model_judgements_immutable BEFORE UPDATE ON model_judgements
+           BEGIN SELECT RAISE(ABORT, 'model judgements cannot be edited'); END""",
+        """CREATE TRIGGER model_judgements_undeletable BEFORE DELETE ON model_judgements
+           BEGIN SELECT RAISE(ABORT, 'model judgements cannot be deleted'); END""",
+    ),
     7: (
         """CREATE TABLE problems (
                reference   TEXT PRIMARY KEY,

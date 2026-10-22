@@ -183,7 +183,7 @@ def _seq(fields: dict) -> int:
 
 def _hash(fields: dict) -> str:
     value = fields.get("entry_hash")
-    if not isinstance(value, str) or not HASH.match(value):
+    if not isinstance(value, str) or not HASH.fullmatch(value):
         raise DetachedError("The record hash in that file is not a hash.")
     return value
 

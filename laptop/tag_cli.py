@@ -13,7 +13,7 @@ import time
 
 import click
 
-from core import db, models, tags
+from core import db, judgements, models, tags
 from core.paths import notes_db_path
 from desktop import mirror, tagger
 from laptop.client import DesktopClient, TransportError
@@ -112,6 +112,7 @@ def tag(loopback: bool, model: str | None, limit: int, unlock_with: str | None,
 
             note_tags = _parse(answer).get(note.id, [])
             tags.set_tags(conn, note.id, note_tags)
+            _keep_answers(conn, note.id, answer)
             if not note_tags:
                 untagged.append(note.id)
             done += 1
@@ -143,6 +144,26 @@ def _parse(answer: dict) -> dict[int, list[tuple[str, float | None]]]:
         return protocol.parse_tags(answer.get("tags", {}))
     except protocol.ProtocolError as exc:
         raise click.ClickException(f"The desktop sent something unexpected: {exc}") from exc
+
+
+def _keep_answers(conn, note_id: int, answer: dict) -> None:
+    """Keep every answer the model gave about this note, the noes included.
+
+    After `set_tags`, not before: the tags are what the record is filed under
+    and matter more, so if this fails the note is still sorted. Losing a run's
+    answers costs a little evidence about the model; losing its tags would cost
+    the note its place in every report.
+    """
+    from core import protocol
+    try:
+        given = protocol.parse_judgements(answer.get("judgements", {})).get(note_id, [])
+        model, method = protocol.parse_sorting_source(answer)
+    except protocol.ProtocolError as exc:
+        raise click.ClickException(f"The desktop sent something unexpected: {exc}") from exc
+    judgements.record(conn, note_id,
+                      [judgements.Judgement(key, said_yes, confidence)
+                       for key, said_yes, confidence in given],
+                      model=model, method=method)
 
 
 def _person_payload(person: models.Person):

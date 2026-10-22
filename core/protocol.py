@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 from core import chain
+from core.judgements import JUDGED_BINS
 
 PROTOCOL_VERSION = 1
 
@@ -294,7 +295,7 @@ def parse_tags(data: Any) -> dict[int, list[tuple[str, float | None]]]:
             if not isinstance(entry, Mapping):
                 raise ProtocolError("Each tag must be an object.")
             key = _string(entry, "bin", max_length=32)
-            if not BIN_KEY_PATTERN.match(key):
+            if not BIN_KEY_PATTERN.fullmatch(key):
                 raise ProtocolError(f"{key!r} is not a valid bin.")
             confidence = entry.get("confidence")
             if confidence is not None:
@@ -307,3 +308,65 @@ def parse_tags(data: Any) -> dict[int, list[tuple[str, float | None]]]:
         result[note_id] = tags
     return result
 
+
+
+# Model names look like "deepseek-r1:14b" or "gemma4-coach:12b"; methods like
+# "json-note-first-1". Both are stored beside every answer kept, so both are
+# held to a shape rather than taken as whatever text arrived.
+MODEL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")
+METHOD_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+
+def parse_judgements(data: Any) -> dict[int, list[tuple[str, bool, float | None]]]:
+    """Read every self/team answer the desktop's model gave, yes and no.
+
+    Stricter than `parse_tags` on the bin: only the two bins the model is asked
+    about can appear, because an answer about anything else is one nobody asked
+    for. Each bin at most once per note, or a note would be recorded as having
+    answered both ways in the same run.
+    """
+    if not isinstance(data, Mapping):
+        raise ProtocolError("Expected an object of answers per note.")
+    result: dict[int, list[tuple[str, bool, float | None]]] = {}
+    for raw_id, entries in data.items():
+        try:
+            note_id = int(raw_id)
+        except (TypeError, ValueError) as exc:
+            raise ProtocolError(f"{raw_id!r} is not a note id.") from exc
+        if not isinstance(entries, list) or len(entries) > len(JUDGED_BINS):
+            raise ProtocolError(f"Answers for note {note_id} must be a list of at most "
+                                f"{len(JUDGED_BINS)}.")
+        answers: list[tuple[str, bool, float | None]] = []
+        for entry in entries:
+            if not isinstance(entry, Mapping):
+                raise ProtocolError("Each answer must be an object.")
+            key = _string(entry, "bin", max_length=8)
+            if key not in JUDGED_BINS:
+                raise ProtocolError(f"{key!r} is not a bin the model is asked about.")
+            if any(existing == key for existing, _, _ in answers):
+                raise ProtocolError(f"Note {note_id} answered {key!r} twice.")
+            said_yes = entry.get("said_yes")
+            if not isinstance(said_yes, bool):
+                raise ProtocolError("'said_yes' must be true or false.")
+            confidence = entry.get("confidence")
+            if confidence is not None:
+                if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+                    raise ProtocolError("'confidence' must be a number or null.")
+                confidence = float(confidence)
+                if not 0.0 <= confidence <= 1.0:
+                    raise ProtocolError("'confidence' must be between 0 and 1.")
+            answers.append((key, said_yes, confidence))
+        result[note_id] = answers
+    return result
+
+
+def parse_sorting_source(data: Mapping[str, Any]) -> tuple[str, str]:
+    """Which model answered, and which way it was asked."""
+    model = data.get("model")
+    method = data.get("method")
+    if not isinstance(model, str) or not MODEL_NAME_PATTERN.fullmatch(model):
+        raise ProtocolError("'model' is not a model name.")
+    if not isinstance(method, str) or not METHOD_PATTERN.fullmatch(method):
+        raise ProtocolError("'method' is not a method name.")
+    return model, method

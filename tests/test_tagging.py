@@ -144,24 +144,46 @@ def test_the_model_is_asked_only_about_self_and_team(monkeypatch):
     assert "seed" in captured["options"]
 
 
-def test_only_the_bins_the_model_affirms_are_returned(monkeypatch):
+def test_both_answers_are_returned_yes_and_no(monkeypatch):
+    """A no used to be dropped here, which made a missed bin impossible to find
+    afterwards. Both come back now, each with the number the model gave."""
     _stub(monkeypatch, _answer(self=True, self_confidence=0.9,
                                team=False, team_confidence=0.8))
-    tags = tagger.judge_self_team("a note")
-    assert [t.bin_key for t in tags] == ["self"]
-    assert tags[0].confidence == 0.9
-    assert tags[0].matched_by == "model"
+    answers = tagger.judge_self_team("a note")
+    assert [(a.bin_key, a.said_yes, a.confidence) for a in answers] == [
+        ("self", True, 0.9), ("team", False, 0.8)]
+
+
+def test_only_a_yes_becomes_a_tag(monkeypatch):
+    _stub(monkeypatch, _answer(self=True, self_confidence=0.9,
+                               team=False, team_confidence=0.8))
+    sorting = tagger.sort_note("a note", [])
+    assert [(t.bin_key, t.confidence, t.matched_by) for t in sorting.tags] == [
+        ("self", 0.9, "model")]
+    assert len(sorting.judgements) == 2  # the no is kept, just not filed
 
 
 @pytest.mark.parametrize("bad", [7, -1, "high", None, True])
-def test_a_nonsense_confidence_falls_back_low(monkeypatch, bad):
-    """A model returning 7 has misunderstood; treating that as certainty would
-    auto-accept a tag nobody checked."""
+def test_a_nonsense_confidence_is_recorded_as_none_and_reviewed(monkeypatch, bad):
+    """A model returning 7 has misunderstood. The answer keeps None — never a
+    number the model did not give — while the tag falls back below the
+    threshold, because treating 7 as certainty would auto-accept a tag nobody
+    checked."""
     _stub(monkeypatch, _answer(self=True, self_confidence=bad,
                                team=False, team_confidence=0.1))
-    tag = tagger.judge_self_team("a note")[0]
+    sorting = tagger.sort_note("a note", [])
+    assert sorting.judgements[0].confidence is None
+    tag = sorting.tags[0]
     assert tag.confidence == tagger.FALLBACK_CONFIDENCE
     assert tag.needs_review
+
+
+@pytest.mark.parametrize("content", ['["self"]', '"yes"', "7"])
+def test_an_answer_that_is_not_an_object_is_unreadable_not_a_crash(monkeypatch, content):
+    """Valid JSON of the wrong shape used to reach `.get` on a list."""
+    _stub(monkeypatch, {"message": {"content": content}})
+    with pytest.raises(TaggingUnavailable, match="could not be read"):
+        tagger.judge_self_team("a note")
 
 
 def test_an_unreachable_model_is_reported_clearly(monkeypatch):
@@ -187,13 +209,14 @@ def test_the_model_runs_even_when_a_name_matched(monkeypatch):
     question whenever a name appeared would silently lose that."""
     _stub(monkeypatch, _answer(self=False, self_confidence=0.1,
                                team=True, team_confidence=0.85))
-    tags = tagger.tag_note("Sarah spoke up in the retro", PEOPLE)
+    tags = tagger.sort_note("Sarah spoke up in the retro", PEOPLE).tags
     assert sorted(t.bin_key for t in tags) == ["person:1", "team"]
 
 
 def test_aliases_alone_when_the_model_is_switched_off(monkeypatch):
-    tags = tagger.tag_note("Sarah spoke up", PEOPLE, use_model=False)
-    assert [t.bin_key for t in tags] == ["person:1"]
+    sorting = tagger.sort_note("Sarah spoke up", PEOPLE, use_model=False)
+    assert [t.bin_key for t in sorting.tags] == ["person:1"]
+    assert sorting.judgements == []  # the model was not asked, so it said nothing
 
 
 # ── storing tags ─────────────────────────────────────────────────────────────
@@ -310,6 +333,7 @@ def test_people_round_trip():
     {"bin": "../../etc/passwd", "confidence": 1.0},
     {"bin": "team", "confidence": 7},
     {"bin": "team", "confidence": "high"},
+    {"bin": "team\n", "confidence": 0.5},   # `$` allows a trailing newline
 ])
 def test_malformed_tags_from_the_desktop_are_refused(bad):
     with pytest.raises(protocol.ProtocolError):

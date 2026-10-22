@@ -18,7 +18,7 @@ from desktop import tagger
 from desktop.__main__ import MutualTLSRequestHandler
 from desktop.service import create_app
 from desktop.sessions import SessionStore
-from desktop.tagger import Tag
+from core.judgements import Judgement
 
 DEVICE = "laptop"
 
@@ -163,7 +163,7 @@ def test_a_named_person_is_tagged_without_the_model(server, client, session, mon
 
 def test_alias_and_model_tags_are_combined(server, client, session, monkeypatch):
     monkeypatch.setattr(tagger, "judge_self_team",
-                        lambda text, **kw: [Tag("team", 0.85, "model")])
+                        lambda text, **kw: [Judgement("team", True, 0.85)])
     _load(client, server, session)
     tags = client.post(f"{server}/tag",
                        json={"session_id": session, "note_ids": [1]}).json()["tags"]["1"]
@@ -202,7 +202,7 @@ def test_a_failing_model_stops_but_keeps_earlier_work(server, client, session, m
         calls["n"] += 1
         if calls["n"] > 1:
             raise tagger.TaggingUnavailable("model went away")
-        return [Tag("team", 0.9, "model")]
+        return [Judgement("team", True, 0.9)]
 
     monkeypatch.setattr(tagger, "judge_self_team", flaky)
     first = _note()
@@ -242,3 +242,18 @@ def test_a_long_run_does_not_expire_its_own_session(server, client, session, mon
     for _ in range(3):
         assert client.post(f"{server}/tag",
                            json={"session_id": session, "note_ids": [1]}).status_code == 200
+
+
+def test_every_answer_is_returned_with_the_method(server, client, session, monkeypatch):
+    """Service version 4: the noes travel too, or the laptop cannot keep them."""
+    monkeypatch.setattr(tagger, "judge_self_team", lambda text, **kw: [
+        Judgement("self", False, 0.8), Judgement("team", True, 0.85)])
+    _load(client, server, session)
+    result = client.post(f"{server}/tag",
+                         json={"session_id": session, "note_ids": [1]}).json()
+    assert result["judgements"]["1"] == [
+        {"bin": "self", "said_yes": False, "confidence": 0.8},
+        {"bin": "team", "said_yes": True, "confidence": 0.85}]
+    assert result["method"] == tagger.METHOD
+    assert protocol.parse_judgements(result["judgements"])  # and it reads back
+    assert {t["bin"] for t in result["tags"]["1"]} == {"person:1", "team"}
