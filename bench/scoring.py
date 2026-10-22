@@ -21,7 +21,7 @@ REVIEW_THRESHOLD = 0.75
 
 @dataclass(frozen=True)
 class Decision:
-    note: int
+    note: str  # the case's name, so a result can be found without counting
     bin: str
     wanted: bool
     arguable: bool
@@ -45,9 +45,9 @@ def score(name: str, decisions: list[Decision], seconds: float, notes: int) -> N
     print(f"  right yes: {len(right_yes)}, of which review holds {len(held)}")
     print(f"  wrong no:  {len(wrong_no)} (never reviewed)")
     for d in wrong_yes + wrong_no:
-        print(f"    note {d.note:2} {d.bin}: said {'yes' if d.said else 'no'} "
+        print(f"    {d.note} {d.bin}: said {'yes' if d.said else 'no'} "
               f"at {d.confidence:.2f}")
     arguable = [d for d in decisions if d.arguable and (d.said or d.wanted)]
     for d in arguable:
-        print(f"    arguable note {d.note:2} {d.bin}: label {'yes' if d.wanted else 'no'}, "
+        print(f"    arguable {d.note} {d.bin}: label {'yes' if d.wanted else 'no'}, "
               f"said {'yes' if d.said else 'no'} at {d.confidence:.2f}")

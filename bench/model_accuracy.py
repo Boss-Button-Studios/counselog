@@ -13,8 +13,8 @@ the end to see whether it held.
     PYTHONPATH=. .venv/bin/python bench/model_accuracy.py --set pmo --shipping-only \
         --backend llamacpp --model gpt-oss-20b
 
-`--set pmo` uses the thirty-two PMO notes in `bench/pmo.py` instead. Those are
-nearly all negatives, so the number to watch there is how often the model says
+`--set pmo` uses the eighty-two PMO notes in `bench/pmo.py` instead. Those are
+mostly negatives, so the number to watch there is how often the model says
 yes to a note about one person. Arguable labels are scored apart, because a
 model disagreeing with an arguable label has not necessarily got it wrong.
 
@@ -32,10 +32,10 @@ from bench.notes import cases
 
 def run(label: str, template: str, notes, **how) -> str:
     print(f"\n=== {label} ===", flush=True)
-    firm = [n for n in notes if not n[2]]
+    firm = [n for n in notes if not n.arguable]
     right = agreed = false_yes = 0
     total_seconds = 0.0
-    for index, (expected, text, arguable) in enumerate(notes, start=1):
+    for index, (name, expected, text, arguable) in enumerate(notes, start=1):
         bins, _, seconds = ask(text, template, **how)
         total_seconds += seconds
         correct = bins == expected
@@ -51,12 +51,12 @@ def run(label: str, template: str, notes, **how) -> str:
         print(f"  {index:2}. want {shown(expected):8} got {shown(bins):8} "
               f"{verdict}  ({seconds:.0f}s)", flush=True)
 
-    repeated, _, seconds = ask(notes[0][1], template, **how)
-    held = repeated == notes[0][0]
+    repeated, _, seconds = ask(notes[0].text, template, **how)
+    held = repeated == notes[0].expected
     print(f"  note 1 asked again at the end: {shown(repeated)} "
           f"{'(same)' if held else '(CHANGED)'}  ({seconds:.0f}s)", flush=True)
 
-    negatives = sum(1 for expected, _, _ in firm if not expected)
+    negatives = sum(1 for case in firm if not case.expected)
     arguable_count = len(notes) - len(firm)
     summary = (f"{right}/{len(firm)} correct, yes on {false_yes}/{negatives} "
                f"one-person notes"

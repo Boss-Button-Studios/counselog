@@ -26,7 +26,7 @@ asks for explicitly.
 | data | what it is |
 |---|---|
 | `notes.py` | `cases()`, the one loader every scorer uses. Six hand-labelled notes, and the fictitious record `seed_record.py` writes. |
-| `data/pmo_notes.md`, read by `pmo.py` | Thirty-two fictitious PMO notes, generated outside this project and kept as they arrived. Nearly all are about one person, so they measure how often a model says yes when it should not. Self/team labels are in `pmo.py`, proposed and not yet reviewed. |
+| `data/pmo_notes*.md`, read by `pmo.py` | Eighty-two fictitious PMO notes in two files, generated outside this project and kept as they arrived. Headings give the first self/team label (Team-wide, Self-note, or a person); the overrides in `pmo.py` are proposed and not yet reviewed. |
 
 ## Running them
 
@@ -54,47 +54,34 @@ becomes a tag, and a tag below the review threshold is held for a person — so
 and are tested in `tests/test_bench_data.py`; the scripts that call models are
 not.
 
-## Results, 2026-10-21
+## Results, 2026-10-22
 
-Radeon VII (16 GB, Vulkan), 38 notes (six labelled + thirty-two PMO), 70 firm
-decisions of which only 4 are a yes. **That last number is the weakness of every
-row below**: a set this short on positives can tell a model that says yes too
-often from one that does not, and very little else.
+Radeon VII (16 GB, Vulkan), 88 notes (six labelled + eighty-two PMO): 160 firm
+decisions, of which 14 are a yes. Arguable labels are listed by each script but
+not scored.
 
-| method | right | wrong yes (trusted) | wrong no | s/note |
-|---|---|---|---|---|
-| deepseek-r1:14b, json, Ollama | 6/6 labelled only | — | — | 100–215 |
-| gpt-oss-20b, json, llama.cpp | stuck on note 5: 13k tokens of reasoning at temperature 0 | | | |
-| gemma4 12b, json, llama.cpp | 68/70 | 2 (2) | 0 | 1.8 |
-| gemma4 12b, logprob, llama.cpp | 68/70 | 2 (2) | 0 | 0.9 |
-| Laya, noul, **CPU** | 65/70 | 4 (1) | 1 | 0.5 |
-| Laya, two-option choice, CPU | 35/70 | 34 (21) | 1 | 0.5 |
+| method | right | right yes, of 14 | wrong yes (trusted) | wrong no | s/note |
+|---|---|---|---|---|---|
+| gemma4 12b, json, llama.cpp | 148/160 | 7 | 5 (5) | 7 | 1.9 |
+| gemma4 12b, logprob, llama.cpp | 143/160 | 9 | 12 (12) | 5 | 1.0 |
+| Laya, noul, **CPU** | 142/160 | 7 | 11 (3) | 7 | 0.7 |
+| Laya, two-option choice, CPU | 80/160 | 9 | 75 (40) | 5 | 0.7 |
 
-- Ollama is slower than CPU-only was (88 s/note) for the same model on this card.
-- gemma's confidence is 0.89–1.00 on its mistakes either way it is asked, so
-  review never sees them. Reading it off the logits did not make it honest.
-- Laya's confidences spread out, so review catches more of its errors — but it
-  missed "I lost my temper in the planning meeting", the plainest `self` in the
-  set. The card's suggested `choice` workaround made it far worse, not better.
+**Every method finds about half the notes that belong in self or team.** The
+headline accuracy is carried by the negatives; the yeses are where they fail.
+gemma's json answer missed `self` on all four Self-note entries, including
+"That's on me as much as anyone". And a missed bin makes no tag, so review —
+the product's only safety net — never sees it.
 
-## Seeding a record to look at
+- gemma is confident whatever it says: 0.90 or 1.00 on every mistake, written or
+  read off the logits. Review would catch none of them.
+- Laya's confidences spread, so review catches most of its wrong yeses (8 of
+  11) — but it would also hold 6 of its 7 right ones. At 0.75 nearly every Laya
+  yes goes to review, which is honest and not much use.
+- The card's `choice` workaround is no good on these notes at any size.
 
-`seed_record.py` writes fictitious notes and tags into a Counselog database, so
-the reading pages can be looked at without anyone testing against their own
-notes.
-
-    COUNSELOG_HOME=/tmp/counselog-demo .venv/bin/python bench/seed_record.py
-
-**It refuses to run against your real record**, and that refusal is the point of
-the script existing here rather than being retyped each time. A tool that
-fabricates notes must never be able to fabricate them in the record that is
-supposed to be evidence — so it insists on a `COUNSELOG_HOME` you set yourself,
-one that is not the default, and it will not add to a database it did not seed.
-
-## Why they are not in `tests/`
-
-`pyproject.toml` sets `testpaths = ["tests"]`, so `pytest` never collects this
-directory, and `packages` lists the modules that ship — `bench` is not one of
-them, so it is not installed. Both of those are deliberate: a suite that takes
-twenty minutes and needs a language model would stop being run, and the day a
-test suite stops being run is the day it stops being true.
+Before 2026-10-22 the set had 38 notes and only 4 yeses; on that set every
+method looked nearly perfect (gemma 68/70), which is the reason not to trust a
+set without positives. deepseek-r1:14b (6/6 on the six labelled notes, 100–215
+s/note on Ollama) and gpt-oss-20b (looped for ten minutes at temperature 0) were
+measured then and not re-run.

@@ -11,6 +11,8 @@ anything useful.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 # ── labelled for the self/team question ──────────────────────────────────────
 #
 # The label is the set of bins the model should return. An empty set means the
@@ -42,20 +44,30 @@ LABELLED: list[tuple[set[str], str]] = [
 
 
 
-def cases(which: str) -> list[tuple[set[str], str, bool]]:
-    """A labelled set as (expected bins, note text, whether the label is arguable).
+class Case(NamedTuple):
+    """One labelled note, as every scorer sees it."""
+    name: str            # how a result refers to it: "labelled 3", "2026-07-02 Maria Chen"
+    expected: set[str]   # the bins it should get
+    text: str
+    arguable: bool       # scored apart from the firm labels
 
-    `which` is "labelled" for the six above, "pmo" for `bench/pmo.py`'s
-    thirty-two, or "all" for both. One loader for every scorer, so two scripts
-    compared on "the same notes" really are.
+
+def cases(which: str) -> list[Case]:
+    """A labelled set: "labelled" for the six above, "pmo" for `bench/pmo.py`'s
+    eighty-two, or "all" for both.
+
+    One loader for every scorer, so two scripts compared on "the same notes"
+    really are.
     """
     if which == "all":
         return cases("labelled") + cases("pmo")
     if which == "pmo":
         from bench import pmo
-        return [(note.expected, note.text, note.arguable) for note in pmo.load()]
+        return [Case(f"{note.date} {note.subject}", note.expected, note.text, note.arguable)
+                for note in pmo.load()]
     if which == "labelled":
-        return [(expected, text, False) for expected, text in LABELLED]
+        return [Case(f"labelled {index}", expected, text, False)
+                for index, (expected, text) in enumerate(LABELLED, start=1)]
     raise ValueError(f"no labelled set called {which!r}")
 
 

@@ -37,23 +37,23 @@ from bench.scoring import Decision, score
 from desktop.tagger import DEFAULT_THRESHOLD, _confidence
 
 
-def by_json(index, expected, text, arguable, how) -> tuple[list[Decision], float]:
-    bins, confidences, seconds = ask(text, PROMPT, **how)
-    return [Decision(index, key, key in expected, arguable, key in bins,
+def by_json(case, how) -> tuple[list[Decision], float]:
+    bins, confidences, seconds = ask(case.text, PROMPT, **how)
+    return [Decision(case.name, key, key in case.expected, case.arguable, key in bins,
                      _confidence(confidences.get(key)))
             for key in YES_NO_QUESTIONS], seconds
 
 
-def by_logprob(index, expected, text, arguable, model) -> tuple[list[Decision], float]:
+def by_logprob(case, model) -> tuple[list[Decision], float]:
     decisions, total = [], 0.0
     for key, question in YES_NO_QUESTIONS.items():
-        p_yes, covered, seconds = ask_yes_no(text, question, model=model)
+        p_yes, covered, seconds = ask_yes_no(case.text, question, model=model)
         total += seconds
         if covered < 0.5:
-            print(f"     note {index} {key}: only {covered:.0%} of the answer was yes/no",
+            print(f"     {case.name} {key}: only {covered:.0%} of the answer was yes/no",
                   flush=True)
         said = p_yes >= 0.5
-        decisions.append(Decision(index, key, key in expected, arguable, said,
+        decisions.append(Decision(case.name, key, key in case.expected, case.arguable, said,
                                   p_yes if said else 1 - p_yes))
     return decisions, total
 
@@ -69,13 +69,12 @@ def main() -> int:
 
     results = {"json": ([], 0.0), "logprob": ([], 0.0)}
     try:
-        for index, (expected, text, arguable) in enumerate(notes, start=1):
+        for index, case in enumerate(notes, start=1):
             for method in results:
                 if method == "json":
-                    found, seconds = by_json(index, expected, text, arguable, how)
+                    found, seconds = by_json(case, how)
                 else:
-                    found, seconds = by_logprob(index, expected, text, arguable,
-                                                options.model)
+                    found, seconds = by_logprob(case, options.model)
                 decisions, total = results[method]
                 results[method] = (decisions + found, total + seconds)
             print(f"  {index}/{len(notes)}", end="\r", flush=True)

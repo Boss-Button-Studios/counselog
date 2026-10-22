@@ -96,14 +96,14 @@ def main() -> int:
     notes = cases("all")
     for name, questions in (("laya noul", as_noul()), ("laya choice", as_choice())):
         decisions, total = [], 0.0
-        for index, (expected, text, arguable) in enumerate(notes, start=1):
+        for case in notes:
             started = time.monotonic()
-            answers = agent.system_one(text, questions)["answers"]
+            answers = agent.system_one(case.text, questions)["answers"]
             total += time.monotonic() - started
             for key in QUESTIONS:
                 p = p_yes(answers[key])
                 said = p >= 0.5
-                decisions.append(Decision(index, key, key in expected, arguable, said,
+                decisions.append(Decision(case.name, key, key in case.expected, case.arguable, said,
                                           p if said else 1 - p))
         score(name, decisions, total, len(notes))
     return 0

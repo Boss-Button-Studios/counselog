@@ -853,9 +853,12 @@ logprob classifier, and a Laya run in its own venv. Numbers and caveats are in
   deepseek-r1:14b's 100–215 s on Ollama.
 - **No method yet makes review catch the mistakes that matter.** gemma is
   confidently wrong; Laya is honestly uncertain but misses plain cases.
-- **The test set is the bottleneck, not the model.** Four firm positives in 38
-  notes. More self and team notes are needed before any of this decides a
-  default — and their labels are the record owner's call, not the tool's.
+- **Update 2026-10-22, with 50 more notes (14 firm yeses in 88):** every
+  method finds only about half the notes that belong in self or team. The
+  earlier near-perfect scores came from a set with almost no positives. A
+  missed bin makes no tag, so review never sees it — which makes the backlog's
+  "labels only exist where the model said yes" a product problem, not just a
+  training one: the self and team bins are silently half empty.
 
 Nothing in `desktop/tagger.py` has changed. Moving it to llama.cpp is a backend
 setting in `core/config` and a second request builder, and waits on the above.
@@ -899,6 +902,28 @@ Raised while playtesting; recorded so they are not rediscovered later.
   bin, and only the per-person one has a page. §9 asks for exactly one report,
   so this is scope rather than an oversight — `core/reports` already works on
   any bin key, so it is a route and a heading when it is wanted.
+
+- **Clues the notes leave about how to read them.** The PMO expansion set
+  (2026-10-22) showed notes carrying instructions for their own processing,
+  written by the supervisor to their future self. Each is a feature someone
+  will want, and each is a way the tool could misread its own record:
+  - *Follow-ups.* Nearly every note ends with one, and they are action items
+    with an owner (the writer) and often a date ("Revisit with Sam Friday Oct
+    23"). A digest that cannot tell an open follow-up from a closed one is
+    missing the part a supervisor rereads most.
+  - *Requests for analysis.* "I write more words about people when I'm worried
+    about them … I want whatever this tool becomes to help me see that." Note
+    length and sentiment per person, over time, is the first analysis worth
+    building — and the length half needs no model at all: it is a count over
+    the record, deterministic and cheap (Law 7, Guideline 3).
+  - *Self-observations about bias.* "Reviewing these notes it's like 70%
+    problems. That's not a true picture of anyone." A report that surfaces this
+    pattern helps the record be fair; one that only summarises would amplify it.
+  - *Privacy markers.* Three entries say `Visibility: Private`. **Decided
+    2026-10-22: no extra privacy tier.** Counselog is eyes-only already; a
+    second level inside it would be a promise about who reads which note that
+    nothing else in the design is built to keep. A marker like this is note
+    text and stays note text.
 
 - **Learning from review.** Every review is already a labelled example:
   `note_tags` rows with `decided_by = 'person'` and `decision` included or
@@ -1225,6 +1250,99 @@ ECDSA-P256 over the chain head at each sync, using PIV slot 9c — key generated
 on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
+
+## The safety net: checking the sorting ⬜ *(scoped 2026-10-22, not started)*
+
+**Why.** Measured on 88 notes, every model finds only about half of what belongs
+in `self` or `team` (`bench/README.md`). A missed bin makes no tag, and review
+today only ever shows *tags*, so a miss is invisible: the bins are silently half
+empty and nothing in the interface says so. The same blindness is why the
+backlog says training would learn from a biased sample. One feature fixes both,
+which is why it comes before any trainer: the trainer's data *is* this feature's
+output.
+
+**What exists, and what it lacks** (read from the code, 2026-10-22):
+
+- `judge_self_team` asks for a confidence on both answers, then keeps only the
+  yeses. A confident no and an unsure no are thrown away identically.
+- `set_tags` marks the note `processed`. "Sorted into nothing" and "never
+  considered" are then the same row — the backlog's "no bin matched cannot be
+  told from the model changed its mind", in its general form.
+- `confirm_tag` / `reject_tag` NULL the confidence, deliberately, so a decision
+  is never mistaken for a guess — and in doing so destroy the model's answer at
+  the moment it gains a right answer to be scored against.
+- `counselog review` (CLI only) lists unsure *yeses*. The web note page shows
+  tags read-only. A below-novice user (Guideline 2) has no way to fix sorting
+  in the browser at all.
+- "Held for review" is already taken in the web UI by quarantined spool
+  entries. This feature needs another name — **"Check the sorting"**.
+
+**Scope — five parts, each shippable on its own, in this order:**
+
+1. **Keep every answer the model gives.** A new append-only table, schema v8:
+
+       model_judgements(note_id, bin_key, said_yes, confidence,
+                        model, method, judged_at)
+
+   One row per bin per sorting run, yes *and* no, never updated. `note_tags`
+   stays what it is — the current state, which the reports read — so nothing
+   that reads it changes. This also settles the backlog item: confirm and
+   reject can keep clearing `note_tags.confidence`, because the guess now lives
+   here. `model` and `method` (json / logprob / …) are recorded so a later
+   calibration fits only the answers it is calibrating. No note text: ids and
+   numbers only, inside the encrypted database like everything else.
+
+2. **A queue with three kinds of entry**, computed from the record, nothing
+   stored:
+   - *In no bin at all.* Processed, no included tag of any kind. The one that
+     matters most and the one that does not exist today.
+   - *Unsure answers, either way.* A yes **or a no** below the threshold. Only
+     possible once part 1 keeps the noes.
+   - *An audit sample of confident answers.* A fixed one-in-N of the rest,
+     chosen by a keyed hash of the note id so the same notes are sampled every
+     time — a stable sample, not a reshuffle each visit (Law 7). This is the
+     part that makes the data unbiased: without it, a confident mistake is never
+     seen, and calibration and training both inherit the blind spot.
+
+   Anything a person has already answered leaves the queue for that bin.
+
+3. **"Check the sorting" in the browser.** One note at a time, the text, and
+   for each of self and team a plain question with two buttons ("Is this about
+   you? Yes / No"), the model's answer shown beside it as a suggestion, never
+   pre-selected. Plus "Someone named here isn't in a bin", which links to that
+   person's page to add the alias — because an alias, once added, fixes every
+   past and future note at once and a one-off tag fixes one. Keyboard-operable,
+   real `<button>`s, readable without colour (Guideline 5). The notes page gets
+   a count: "7 notes are in no bin."
+
+4. **The CLI catches up.** `counselog review` gains the same three kinds, so the
+   two interfaces describe one queue — the same rule as `verify`'s wording.
+
+5. **Say how far to trust the bins.** From the audit sample alone: "Of the last
+   40 notes checked at random, the sorting missed 6." That is a measurement, it
+   is the honest answer to "can I rely on the self bin?", and it is the number
+   that tells the owner whether a better model or a trainer is worth it. Shown
+   on the digest pages for self and team, and only once the sample is big
+   enough to mean something.
+
+**Out of scope here:** any training or calibration (the backlog's three levels
+build on part 1's table), changing the model, and a privacy tier (decided
+against, see the backlog).
+
+**Tests, at minimum:** a no is recorded with its confidence; re-sorting appends
+rather than overwrites; a person's answer still beats the model's in
+`set_tags`; each queue kind appears and disappears correctly; the audit sample
+is identical across runs and changes only when N or the key does; a superseded
+note never queues; the trust figure is withheld below the minimum sample; the
+v8 migration on a v7 database, with a v7 record's existing tags intact.
+
+**Open questions for the owner:**
+- The audit rate N. 1 in 10 is a guess: high enough to fill a sample in a few
+  months of notes, low enough not to be a chore.
+- Whether an unsure no should use the same threshold as an unsure yes. A missed
+  bin is the costlier mistake, which argues for a looser one.
+- Whether the queue is offered after each sorting run, or waits to be visited.
+  Being offered is more likely to be used; it is also a nag.
 
 ## Phase 8 — Harden + docs 🟨
 
