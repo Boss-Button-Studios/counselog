@@ -925,6 +925,42 @@ Raised while playtesting; recorded so they are not rediscovered later.
     nothing else in the design is built to keep. A marker like this is note
     text and stays note text.
 
+- **A production instance beside a development one.** Raised 2026-10-22. So
+  far the running copy has been a test bed with no real notes, so a restart or
+  a schema change loses nothing. Once real notes go in, the real record wants
+  a copy of its own on this machine, and this folder stays for development.
+  What exists, and what is in the way:
+  - *Three locations, three overrides.* Data (keyring, databases, spool) goes
+    to `COUNSELOG_HOME`, by default `~/.local/share/counselog`
+    (`core/paths.py`). Settings come from `COUNSELOG_ENV_FILE`, by default the
+    `.env` in the checkout (`core/config.py`). Certificates come from
+    `COUNSELOG_CERTS`, by default `certs/` in the checkout (`core/certs.py`).
+    Settings and certificates already follow the checkout. **Data does not:**
+    every checkout shares the one default home, so today a development copy
+    and a production copy would open the same record.
+  - *`COUNSELOG_HOME` cannot go in `.env`.* `load_env()` runs only when a
+    network setting is first read, so a home set in `.env` takes effect only
+    if a network setting happens to be read before the first path. That
+    depends on the command, which is exactly what Law 7 forbids. Fix it
+    before relying on it: load `.env` once at startup in each entry point, or
+    make `counselog_home()` load it too.
+  - *Production as its own checkout*, of a tagged commit with its own `.venv`,
+    so editing this folder never changes the code that holds the record. It
+    keeps the default home. Development gets a home inside this folder
+    (gitignored), so its schema can run ahead: migrations only go forward,
+    and a newer database refuses to open in an older build.
+  - *Separate certificate authorities.* If each instance runs its own CA, a
+    development client cannot reach the production service at all. This is
+    mutual TLS doing the job it already does, not a new check. They also
+    need different ports.
+  - *Say which one it is.* A real note typed into the development copy is
+    in the wrong record, and moving it means a tombstone in one record and
+    a re-entry in the other. The web pages and the CLI should name the
+    instance when it is not production (Guideline 2). A step further: a git
+    working tree could refuse the default home unless told to use it.
+  - *The YubiKey.* Both instances would ask the same key. Decide whether
+    development unlocks by password only, or gets a slot of its own.
+
 - **Learning from review.** Every review is already a labelled example:
   `note_tags` rows with `decided_by = 'person'` and `decision` included or
   excluded. Three levels, cheapest first, and none worth building until there
