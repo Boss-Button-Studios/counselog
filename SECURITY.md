@@ -252,6 +252,13 @@ internal message, why there is no log viewer in the browser, and why the
 class — never the message. Treat the log as sensitive, rotate it, and do not
 paste it into a bug report without reading it first.
 
+**Where the log goes.** Run in a terminal, it is that terminal's output. Run as
+the systemd user services (`deploy/install-user-services`), it goes to the
+systemd journal, which keeps it on disk under `/var/log/journal`. journald
+rotates the journal by size, and anyone in the `adm` or `systemd-journal`
+group can read it, as well as root. Read it with
+`journalctl --user -u counselog-web -u counselog-desktop`.
+
 **Erasure cannot be guaranteed.** `forget` tombstones a note and the spool clears
 drained bodies with `PRAGMA secure_delete` and a vacuum, but a copy-on-write
 filesystem, an SSD's wear levelling, or any backup taken earlier can keep old

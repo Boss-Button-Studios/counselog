@@ -958,6 +958,11 @@ Raised while playtesting; recorded so they are not rediscovered later.
     a re-entry in the other. The web pages and the CLI should name the
     instance when it is not production (Guideline 2). A step further: a git
     working tree could refuse the default home unless told to use it.
+  - *The services.* `deploy/install-user-services` (2026-10-23) installs
+    `counselog-web` and `counselog-desktop` as user units for whichever
+    checkout runs it, and running it from another checkout repoints them.
+    A second instance needs its own unit names, data folder and port, so
+    the script will need an instance name.
   - *The YubiKey.* Both instances would ask the same key. Decide whether
     development unlocks by password only, or gets a slot of its own.
 

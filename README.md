@@ -21,3 +21,20 @@ on any of this. `counselog-tech-spec.md` has the design and `CLAUDE.md` the
 working rules.
 
 **Status:** v0 in development.
+
+## Running it
+
+On the desktop, both services run as systemd user units:
+
+    deploy/install-user-services
+
+This installs `counselog-web` (the browser interface, reached through
+`tailscale serve`) and `counselog-desktop` (sorting and the mirror), pointed at
+the checkout the script is run from. Both start at boot and restart if they
+fail. Lingering must be on for them to run while you are logged out
+(`loginctl enable-linger`). After pulling new code, restart them:
+
+    systemctl --user restart counselog-web counselog-desktop
+
+Restarting the browser interface signs every browser out. That is deliberate:
+its session keys exist only in memory.

@@ -1,0 +1,24 @@
+# The browser interface. Installed by deploy/install-user-services, which
+# replaces @CHECKOUT@ with the folder it was run from. Not used from here.
+[Unit]
+Description=Counselog browser interface (127.0.0.1, behind tailscale serve)
+After=network-online.target
+
+[Service]
+ExecStart=@CHECKOUT@/counselogweb
+WorkingDirectory=@CHECKOUT@
+# Signing in again after a restart is the intended cost: the session keys live
+# in this process only, so a restart seals the notes.
+Restart=on-failure
+RestartSec=5
+
+# Least privilege (Guideline 4). Everything read-only except the data folder,
+# which holds the notes and the spool it writes to.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA@
+
+[Install]
+WantedBy=default.target
