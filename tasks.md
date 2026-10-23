@@ -1287,7 +1287,7 @@ on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
 
-## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; part 1 done)*
+## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; parts 1–2 done)*
 
 **Why.** Measured on 88 notes, every model finds only about half of what belongs
 in `self` or `team` (`bench/README.md`). A missed bin makes no tag, and review
@@ -1386,6 +1386,36 @@ valid bin key, and a hand-carried signing file could carry a 65-character
 hash. Now `fullmatch` throughout (`protocol`, `detached`, `web/views/reports`).
 Also: valid JSON of the wrong shape from the model (a list, a string) reached
 `.get` and crashed; it is now reported as an unreadable answer.
+
+### Part 2 — the queue ✅ *(2026-10-23)*
+
+`core/checking.py`. `to_check(conn, threshold)` returns the notes worth a
+person's look, each with the bins to ask about, why, and what the model said;
+`count_in_no_bin(conn)` is the figure for the notes page. Nothing is stored.
+Nothing shows it yet; that is parts 3 and 4.
+
+- *In no bin* asks about both `self` and `team`, whatever the model said,
+  since a confident no is exactly what left the note there. It leaves the
+  queue once a person has answered both. It stays in the count, because the
+  note is still in no report.
+- *Unsure* is the latest answer below the threshold, or with no number. For
+  notes sorted before schema 8, the model's own tag stands in as a yes, so
+  nothing `counselog review` showed is lost.
+- *Audit* draws one note in `AUDIT_ONE_IN` by a hash of its chain entry,
+  labelled and versioned. The draw is fixed for the life of the note and
+  independent of the model. A note with no answers on record is not audited:
+  there would be nothing to compare against.
+- Sorted, current, uncleared notes only. A person's answer (`confirm_tag` /
+  `reject_tag`) settles that bin.
+
+Two of the open questions, answered by default so the work could go on. Both
+are one constant each to change:
+- **N = 10.**
+- **An unsure no uses the same threshold as an unsure yes.** A looser one is
+  plausible, but there is no measured basis for picking it until part 5
+  reports how often the confident noes are wrong.
+
+The third question (offered after each run, or visited) belongs to parts 3–4.
 
 **Out of scope here:** any training or calibration (the backlog's three levels
 build on part 1's table), changing the model, and a privacy tier (decided
