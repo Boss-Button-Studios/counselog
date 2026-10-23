@@ -262,3 +262,19 @@ a.quiet-link { font-size: 0.9rem; white-space: nowrap; }
 
 .range > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .range[open] > summary { margin-bottom: 0.4rem; }
+
+/* Check the sorting: one question per bin, two answers of equal weight. Both
+   buttons look the same on purpose — a highlighted one would read as the
+   expected answer, and get given by habit. */
+form.question { margin: 1.2rem 0 0; }
+form.question fieldset { margin: 0; padding: 0.8rem 1rem 1rem; border: 1px solid var(--line); border-radius: var(--radius); }
+form.question legend { padding: 0 0.3rem; font-weight: 600; }
+form.question .aside { margin: 0.2rem 0 0; }
+button.answer {
+  min-width: 6rem;
+  margin-right: 0.6rem;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--muted);
+}
+button.answer:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Check the sorting · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Check the sorting</h1>
+
+  {% if item %}
+    <p class="aside">
+      {{ remaining }} note{{ "" if remaining == 1 else "s" }} to check.
+      Each answer is yours to give: the model's is shown, but it is only a
+      suggestion.
+    </p>
+
+    <h2>{{ item.note.occurred_at | friendly_time }}</h2>
+
+    <p class="notice" role="status">
+      {% if item.reason == "no-bin" %}
+        This note is in no bin, so it appears in no report.
+      {% elif item.reason == "unsure" %}
+        The model was not sure how to sort this note.
+      {% else %}
+        Picked at random: one note in {{ audit_one_in }} is checked whatever the model said.
+        That is the only way to find out how often it is confidently wrong.
+      {% endif %}
+    </p>
+
+    <div class="note-text">{{ item.note.raw_text }}</div>
+
+    {% for question in questions %}
+      {# One form per question, so each answer is saved the moment it is given
+         and a half-answered note is never lost. Two plain buttons, neither
+         styled or focused as the default. #}
+      <form method="post" class="question"
+            action="{{ url_for('answer_sorting', note_id=item.note.id, bin_key=question.bin_key) }}">
+        <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+        {% if after %}<input type="hidden" name="after" value="{{ after }}">{% endif %}
+        <fieldset>
+          <legend>{{ question.text }}</legend>
+          <p class="aside" id="hint-{{ question.bin_key }}">{{ question.suggestion }}</p>
+          <button type="submit" name="answer" value="yes" class="answer"
+                  aria-describedby="hint-{{ question.bin_key }}">Yes</button>
+          <button type="submit" name="answer" value="no" class="answer"
+                  aria-describedby="hint-{{ question.bin_key }}">No</button>
+        </fieldset>
+      </form>
+    {% endfor %}
+
+    <p class="aside">
+      Someone named here is not in their bin? Add the name they go by on
+      <a href="{{ url_for('people_list') }}">their page</a>. Names are matched
+      in notes sorted from then on.
+    </p>
+
+    <p class="aside">
+      <a href="{{ url_for('check_sorting', after=item.note.id) }}">Not now, show the next one</a> ·
+      <a href="{{ url_for('note_detail', note_id=item.note.id) }}">Open this note</a>
+    </p>
+
+  {% elif passed_over %}
+    <p>That was the last one. The notes you passed over are still waiting.</p>
+    <p><a href="{{ url_for('check_sorting') }}">Start again from the first</a></p>
+
+  {% else %}
+    <p>Nothing to check. Every note is in a bin, and the model was sure of
+       every answer not picked for checking.</p>
+  {% endif %}
+
+  <p class="aside">
+    <a href="{{ url_for('note_list') }}">Your notes</a> ·
+    <a href="{{ url_for('home') }}">Back to writing</a>
+  </p>
+
+{% endblock %}

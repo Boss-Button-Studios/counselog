@@ -29,6 +29,7 @@ from typing import Iterable, Sequence
 import httpx
 
 from core import config
+from core.checking import REVIEW_THRESHOLD
 from core.judgements import Judgement
 from core.sanitize import sanitize
 
@@ -37,7 +38,7 @@ from core.sanitize import sanitize
 # and llama3.1:8b, mistral:7b and phi3:mini all 2/5 at 2-4s. The small models
 # were fast and wrong — biased toward answering yes to everything.
 DEFAULT_MODEL = "deepseek-r1:14b"
-DEFAULT_THRESHOLD = 0.75
+DEFAULT_THRESHOLD = REVIEW_THRESHOLD  # defined with the rest of the checking rules
 
 # Which way of asking produced an answer, recorded beside every answer kept
 # (`core.judgements`). Answers from different prompts are not comparable, so

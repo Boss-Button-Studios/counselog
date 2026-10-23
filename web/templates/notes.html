@@ -10,6 +10,16 @@
       newest first{% if cleared %}, {{ cleared }} of them cleared{% endif %}.
     </p>
 
+    {% if in_no_bin %}
+      {# A note in no bin is in no report, and nothing else on any page would
+         say so. #}
+      <p class="notice" role="status">
+        {{ in_no_bin }} note{{ " is" if in_no_bin == 1 else "s are" }} in no bin,
+        so {{ "it appears" if in_no_bin == 1 else "they appear" }} in no report.
+        <a href="{{ url_for('check_sorting') }}">Check the sorting</a>
+      </p>
+    {% endif %}
+
     <ul class="rows notes">
       {% for thread in threads %}
         {% set note = thread.current %}
@@ -44,10 +54,11 @@
     <a href="{{ url_for('home') }}">Write a note</a> ·
     <a href="{{ url_for('people_list') }}">People</a> ·
     <a href="{{ url_for('reports_dashboard') }}">Reports</a> ·
+    <a href="{{ url_for('check_sorting') }}">Check the sorting</a> ·
     <a href="{{ url_for('verify_record') }}">Check the record</a> ·
     <a href="{{ url_for('device_list') }}">Browsers</a> ·
     <a href="{{ url_for('held_list') }}">Held for review</a> ·
-      <a href="{{ url_for('problem_list') }}">Recent problems</a>
+    <a href="{{ url_for('problem_list') }}">Recent problems</a>
   </p>
 
 {% endblock %}

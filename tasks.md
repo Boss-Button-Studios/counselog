@@ -1287,7 +1287,7 @@ on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
 
-## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; parts 1–2 done)*
+## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; parts 1–3 done)*
 
 **Why.** Measured on 88 notes, every model finds only about half of what belongs
 in `self` or `team` (`bench/README.md`). A missed bin makes no tag, and review
@@ -1416,6 +1416,31 @@ are one constant each to change:
   reports how often the confident noes are wrong.
 
 The third question (offered after each run, or visited) belongs to parts 3–4.
+
+### Part 3 — "Check the sorting" in the browser ✅ *(2026-10-23)*
+
+`/check` (`web/views/checking.py`, `check.html`). It shows one note at a time:
+why it is there, the full text, and a fieldset per open bin with a plain
+question, the model's answer as a sentence, and two Yes / No buttons. The
+buttons are identical apart from their value, and neither is focused or
+highlighted; a test pins that. Each answer is its own form, saved at once,
+through `confirm_tag` / `reject_tag`. "Not now" passes over a note with
+`?after=<id>`, so nothing is stored for it either. Answers are refused for a
+bin the model is not asked about, an answer other than yes or no, and a note
+that has been replaced or cleared since the page loaded.
+
+The notes page now says "N notes are in no bin, so they appear in no report"
+and links here, and its footer links here too.
+
+`REVIEW_THRESHOLD` moved to `core/checking.py`. It is a checking rule, and the
+web pages apply it; `desktop.tagger.DEFAULT_THRESHOLD` now points at it.
+
+**Corrected from the scope:** it said an alias "fixes every past and future
+note at once." It does not. `update_person` re-sorts nothing, and `tag` only
+sorts unprocessed notes, so a new alias reaches only notes sorted after it is
+added. The page says exactly that. Re-matching aliases over sorted notes
+needs no model (it is string matching) and would be cheap. It is recorded
+here rather than built, because it changes tags the reports read.
 
 **Out of scope here:** any training or calibration (the backlog's three levels
 build on part 1's table), changing the model, and a privacy tier (decided

@@ -44,6 +44,11 @@ UNSURE = "unsure"
 AUDIT = "audit"
 _RANK = {NO_BIN: 0, UNSURE: 1, AUDIT: 2}
 
+# Below this, the model's answer is put to a person. Lives here rather than in
+# the tagger because it is a rule about checking, and the web pages and the CLI
+# both apply it — the desktop's tagger reuses it, not the other way round.
+REVIEW_THRESHOLD = 0.75
+
 # One note in this many is drawn for the audit, decided 2026-10-23 as a first
 # guess: enough to fill a useful sample within a few months of notes, few enough
 # not to become a chore. Changing it changes which notes are drawn, so a trust
@@ -103,14 +108,17 @@ def in_audit_sample(entry_hash: str, one_in: int = AUDIT_ONE_IN) -> bool:
     return int.from_bytes(digest[:8], "big") % one_in == 0
 
 
-def to_check(conn: "sqlcipher3.Connection", threshold: float, *,
-             one_in: int = AUDIT_ONE_IN) -> list[ToCheck]:
+def to_check(conn: "sqlcipher3.Connection", threshold: float = REVIEW_THRESHOLD, *,
+             one_in: int | None = None) -> list[ToCheck]:
     """Every note with something worth a person's look, most pressing first.
 
     Only notes that have been sorted, are current (not replaced by a
     correction) and still have their text. An unsorted note is waiting for the
     model, not for a person, and a cleared one has nothing left to read.
     """
+    # Read at call time, not bound as a default, so the page that says "one in
+    # N" and the draw it describes can never disagree.
+    one_in = AUDIT_ONE_IN if one_in is None else one_in
     notes = [note_from_row(r) for r in conn.execute(
         "SELECT * FROM notes WHERE processed = 1 AND tombstoned_at IS NULL "
         f"AND NOT {SUPERSEDED} ORDER BY id")]

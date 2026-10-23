@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from flask import g, redirect, render_template, request, url_for
 
-from core import models, revisions, tags
+from core import checking, models, revisions, tags
 from web.access import open_database, requires_unlock
 
 
@@ -32,7 +32,8 @@ def register(app) -> None:
             threads = list(reversed(revisions.threads(conn)))
             return render_template(
                 "notes.html", caller=g.caller, threads=threads,
-                cleared=sum(1 for t in threads if t.current.tombstoned))
+                cleared=sum(1 for t in threads if t.current.tombstoned),
+                in_no_bin=checking.count_in_no_bin(conn))
         finally:
             conn.close()
 
