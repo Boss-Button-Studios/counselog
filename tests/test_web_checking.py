@@ -225,3 +225,27 @@ def test_checking_needs_a_session(client, record):
     assert client.post(f"/check/{note}/team", data={"answer": "yes"},
                        environ_overrides=TAILSCALE).status_code in (302, 400)
     assert _decision(record, note, "team") is None
+
+
+# ── how far to trust the bins (part 5) ───────────────────────────────────────
+
+def test_the_reports_page_shows_progress_towards_a_trust_figure(client, record):
+    sign_in(client)
+    page = text_of(get(client, "/reports"))
+    assert "How far the sorting can be trusted" in page
+    assert "Notes about you: 0 of the 10 random checks needed" in page
+    assert "Notes about the team: 0 of the 10 random checks needed" in page
+
+
+def test_the_reports_page_shows_the_figure_once_there_is_one(client, record, monkeypatch):
+    monkeypatch.setattr(checking, "AUDIT_ONE_IN", 1)
+    for _ in range(10):
+        note = _sorted(record, "Quiet day.")
+        conn = record()
+        try:
+            tags.confirm_tag(conn, note, "team")
+        finally:
+            conn.close()
+    sign_in(client)
+    assert ("Of the last 10 notes checked at random, the sorting missed 10 that "
+            "were about the team.") in text_of(get(client, "/reports"))

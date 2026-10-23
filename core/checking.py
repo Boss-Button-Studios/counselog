@@ -31,7 +31,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from core.judgements import JUDGED_BINS
+from core import judgements
+from core.judgements import JUDGED_BINS, Judgement
 from core.models import SUPERSEDED, Note, note_from_row
 from core.tags import BY_MODEL, BY_PERSON, INCLUDED, bin_key_for_id
 
@@ -85,12 +86,6 @@ class ToCheck:
         return min((q.reason for q in self.questions), key=_RANK.__getitem__)
 
 
-@dataclass(frozen=True)
-class _Answer:
-    said_yes: bool
-    confidence: float | None
-
-
 def in_audit_sample(entry_hash: str, one_in: int = AUDIT_ONE_IN) -> bool:
     """Is this note one of the fixed sample, whatever the model said about it?
 
@@ -108,32 +103,46 @@ def in_audit_sample(entry_hash: str, one_in: int = AUDIT_ONE_IN) -> bool:
     return int.from_bytes(digest[:8], "big") % one_in == 0
 
 
+def live_notes(conn: "sqlcipher3.Connection") -> list[Note]:
+    """The notes a person could be asked about: sorted, current, not cleared.
+
+    An unsorted note is waiting for the model, not for a person; a replaced one
+    is no longer what the record says; a cleared one has nothing left to read.
+    """
+    return [note_from_row(r) for r in conn.execute(
+        "SELECT * FROM notes WHERE processed = 1 AND tombstoned_at IS NULL "
+        f"AND NOT {SUPERSEDED} ORDER BY id")]
+
+
+def audit_sample(conn: "sqlcipher3.Connection", one_in: int | None = None) -> set[int]:
+    """The ids of every note drawn for the audit, current or not."""
+    one_in = AUDIT_ONE_IN if one_in is None else one_in
+    # A note with no chain entry is a broken record, and `verify` says so; here
+    # it is simply not drawn, rather than failing the whole page.
+    return {int(note_id) for note_id, entry_hash in
+            conn.execute("SELECT note_id, entry_hash FROM note_chain")
+            if in_audit_sample(entry_hash, one_in)}
+
+
 def to_check(conn: "sqlcipher3.Connection", threshold: float = REVIEW_THRESHOLD, *,
              one_in: int | None = None) -> list[ToCheck]:
     """Every note with something worth a person's look, most pressing first.
 
-    Only notes that have been sorted, are current (not replaced by a
-    correction) and still have their text. An unsorted note is waiting for the
-    model, not for a person, and a cleared one has nothing left to read.
+    `one_in` defaults to `AUDIT_ONE_IN` read at call time, not bound as a
+    default, so the page that says "one in N" and the draw it describes can
+    never disagree.
     """
-    # Read at call time, not bound as a default, so the page that says "one in
-    # N" and the draw it describes can never disagree.
-    one_in = AUDIT_ONE_IN if one_in is None else one_in
-    notes = [note_from_row(r) for r in conn.execute(
-        "SELECT * FROM notes WHERE processed = 1 AND tombstoned_at IS NULL "
-        f"AND NOT {SUPERSEDED} ORDER BY id")]
+    notes = live_notes(conn)
     if not notes:
         return []
     included, decided_by_person, tagged = _tags(conn)
-    answers = _latest_answers(conn)
-    hashes = dict(conn.execute("SELECT note_id, entry_hash FROM note_chain").fetchall())
+    answers = judgements.latest_everywhere(conn)
+    drawn = audit_sample(conn, one_in)
 
     queue = []
     for note in notes:
         in_no_bin = note.id not in included
-        # A note with no chain entry is a broken record, and `verify` says so;
-        # here it is simply not drawn, rather than hiding the rest of the queue.
-        sampled = note.id in hashes and in_audit_sample(hashes[note.id], one_in)
+        sampled = note.id in drawn
         questions = []
         for key in JUDGED_BINS:
             if (note.id, key) in decided_by_person:
@@ -165,7 +174,7 @@ def count_in_no_bin(conn: "sqlcipher3.Connection") -> int:
     return int(row[0])
 
 
-def _reason(answer: _Answer | None, threshold: float, in_no_bin: bool,
+def _reason(answer: Judgement | None, threshold: float, in_no_bin: bool,
             sampled: bool) -> str | None:
     if in_no_bin:
         return NO_BIN
@@ -183,7 +192,7 @@ def _tags(conn):
     own tags — the only record of an answer for notes sorted before schema 8."""
     included: set[int] = set()
     by_person: set[tuple[int, str]] = set()
-    tagged: dict[tuple[int, str], _Answer] = {}
+    tagged: dict[tuple[int, str], Judgement] = {}
     for row in conn.execute("SELECT note_id, bin_id, confidence, decided_by, decision "
                             "FROM note_tags"):
         note_id, key = int(row["note_id"]), bin_key_for_id(conn, int(row["bin_id"]))
@@ -192,18 +201,8 @@ def _tags(conn):
         if row["decided_by"] == BY_PERSON:
             by_person.add((note_id, key))
         elif row["decided_by"] == BY_MODEL:
-            tagged[(note_id, key)] = _Answer(True, row["confidence"])
+            tagged[(note_id, key)] = Judgement(key, True, row["confidence"])
     return included, by_person, tagged
-
-
-def _latest_answers(conn) -> dict[tuple[int, str], _Answer]:
-    """What the model said most recently about each note and bin."""
-    latest: dict[tuple[int, str], _Answer] = {}
-    for row in conn.execute("SELECT note_id, bin_key, said_yes, confidence "
-                            "FROM model_judgements ORDER BY id"):
-        latest[(int(row["note_id"]), row["bin_key"])] = _Answer(
-            bool(row["said_yes"]), row["confidence"])  # later rows overwrite
-    return latest
 
 
 # ── wording, shared by the web page and `counselog review` ───────────────────

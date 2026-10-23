@@ -24,7 +24,7 @@ from datetime import date
 
 from flask import g, render_template, request
 
-from core import models, reports
+from core import models, reports, trust
 from web.access import open_database, requires_unlock
 
 # The one shape accepted from the form. `date.fromisoformat` also takes '20260301'
@@ -51,6 +51,7 @@ def register(app) -> None:
                 here=[row for row in rows if row.person.active],
                 gone=[row for row in rows if not row.person.active],
                 recency=_recency, unsorted=reports.unsorted_count(conn),
+                trust=[trust.describe(figure) for figure in trust.trust(conn)],
             )
         finally:
             conn.close()

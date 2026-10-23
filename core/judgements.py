@@ -91,6 +91,20 @@ def for_note(conn: "sqlcipher3.Connection", note_id: int) -> list[RecordedJudgem
     ]
 
 
+def latest_everywhere(conn: "sqlcipher3.Connection") -> dict[tuple[int, str], Judgement]:
+    """The most recent answer for every note and bin, in one read.
+
+    For working over the whole record, where asking note by note would be one
+    query per note.
+    """
+    current: dict[tuple[int, str], Judgement] = {}
+    for row in conn.execute("SELECT note_id, bin_key, said_yes, confidence "
+                            "FROM model_judgements ORDER BY id"):
+        current[(int(row["note_id"]), row["bin_key"])] = Judgement(
+            row["bin_key"], bool(row["said_yes"]), row["confidence"])  # later rows overwrite
+    return current
+
+
 def latest(conn: "sqlcipher3.Connection", note_id: int) -> dict[str, RecordedJudgement]:
     """The most recent answer for each bin — what the model thinks *now*."""
     current: dict[str, RecordedJudgement] = {}

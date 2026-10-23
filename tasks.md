@@ -1292,7 +1292,7 @@ on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
 
-## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; parts 1–4 done)*
+## The safety net: checking the sorting ✅ *(scoped 2026-10-22; done 2026-10-23)*
 
 **Why.** Measured on 88 notes, every model finds only about half of what belongs
 in `self` or `team` (`bench/README.md`). A missed bin makes no tag, and review
@@ -1470,6 +1470,31 @@ once, rather than prompting.
 `SECURITY.md`'s known gap is restated as "a bin the model missed is caught
 only if someone checks". Misses can be found now, but nothing makes anyone
 answer, and a confident miss outside the sample stays unseen.
+
+### Part 5 — how far to trust the bins ✅ *(2026-10-23)*
+
+`core/trust.py`. For each of `self` and `team`, over the most recent
+`WINDOW` (40) checked notes in the audit sample, it counts how many the
+sorting **missed** (model no, person yes) and how many it **added** wrongly
+(model yes, person no). It is shown on the Reports page as a sentence:
+"Of the last 40 notes checked at random, the sorting missed 6 that were about
+the team." Below `MIN_SAMPLE` (10) only progress is shown.
+
+- **Only the audit sample counts.** Notes in no bin and unsure answers were
+  asked about because the model had probably gone wrong. Counting them would
+  make it look worse than it is, and the figure would then be the wrong
+  number to base a model choice on.
+- Only notes with both answers on record count. A pre-schema-8 note has no
+  model answer, and a missing tag there might be a no or might be nothing.
+- The latest model answer is the one scored, so the figure follows the model
+  sorting now.
+
+**Not on the self and team digests, as scoped:** those pages do not exist
+(backlog, "Digests for the self and team bins"). When they do, `trust.describe`
+is the sentence to put on them.
+
+`judgements.latest_everywhere` and `checking.live_notes` / `audit_sample` are
+now shared by the queue and the figure, so both read the same sample.
 
 **Out of scope here:** any training or calibration (the backlog's three levels
 build on part 1's table), changing the model, and a privacy tier (decided

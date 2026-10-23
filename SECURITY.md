@@ -320,8 +320,8 @@ Recorded because a threat model that lists only what is handled is marketing.
   sorting" (`/check`, `counselog review`) puts the notes in no bin, the unsure
   answers either way, and a random one in ten to a person. Nothing makes
   anyone answer. A confident miss outside the random sample stays in the
-  record unseen, and nothing yet says how often that happens (`tasks.md`,
-  "the safety net", part 5).
+  record unseen. The Reports page says how often the sample finds one, once
+  at least ten have been checked; until then nobody knows.
 - **One user, one record.** No multi-tenancy, no sharing, no roles. Anyone who
   can unlock can do everything.
 - **No account recovery.** Deliberate.

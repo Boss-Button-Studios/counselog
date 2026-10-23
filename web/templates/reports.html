@@ -74,6 +74,19 @@
     </p>
   {% endif %}
 
+  <h2>How far the sorting can be trusted</h2>
+  {# From the random sample only: answers checked because the model was unsure,
+     or because a note was in no bin, would overstate its mistakes. #}
+  <ul class="rows">
+    {% for line in trust %}<li><div>{{ line }}</div></li>{% endfor %}
+  </ul>
+  <p class="aside">
+    Measured from notes picked at random for checking, whatever the model said
+    about them, and answered by you. Whether a note names someone is matched
+    exactly, so only "about you" and "about the team" are measured.
+    <a href="{{ url_for('check_sorting') }}">Check the sorting</a>
+  </p>
+
   <p class="aside">
     <a href="{{ url_for('note_list') }}">Your notes</a> ·
     <a href="{{ url_for('people_list') }}">People</a> ·
