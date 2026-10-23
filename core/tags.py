@@ -194,28 +194,6 @@ def notes_for_bin(conn: "sqlcipher3.Connection", key: str, *,
     return [note_from_row(r) for r in conn.execute(sql, params)]
 
 
-def tags_needing_review(conn: "sqlcipher3.Connection", threshold: float) -> list[tuple[Note, str, float]]:
-    """Model-assigned tags the model was not sure about.
-
-    Exact alias matches have a NULL confidence and never appear here — there is
-    nothing to second-guess about a name that is literally present.
-
-    Replaced notes are skipped. A corrected note is re-sorted, so its old version
-    and its new one would otherwise both queue up, asking twice about the same
-    thing and once about text no longer in the record.
-    """
-    rows = conn.execute(
-        "SELECT n.*, t.bin_id, t.confidence FROM note_tags t JOIN notes n ON n.id = t.note_id "
-        f"WHERE t.confidence IS NOT NULL AND t.confidence < ? "
-        f"AND t.decided_by = '{BY_MODEL}' AND t.decision = '{INCLUDED}' "
-        f"AND NOT n.{SUPERSEDED} "
-        "ORDER BY t.confidence, n.id",
-        (threshold,),
-    ).fetchall()
-    return [(note_from_row(r), bin_key_for_id(conn, int(r["bin_id"])), float(r["confidence"]))
-            for r in rows]
-
-
 def confirm_tag(conn: "sqlcipher3.Connection", note_id: int, key: str) -> None:
     """Accept a suggested tag. A confirmed tag is as good as an exact match.
 

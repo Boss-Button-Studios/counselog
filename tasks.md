@@ -1287,7 +1287,7 @@ on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
 
-## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; parts 1–3 done)*
+## The safety net: checking the sorting 🟨 *(scoped 2026-10-22; parts 1–4 done)*
 
 **Why.** Measured on 88 notes, every model finds only about half of what belongs
 in `self` or `team` (`bench/README.md`). A missed bin makes no tag, and review
@@ -1441,6 +1441,30 @@ sorts unprocessed notes, so a new alias reaches only notes sorted after it is
 added. The page says exactly that. Re-matching aliases over sorted notes
 needs no model (it is string matching) and would be cheap. It is recorded
 here rather than built, because it changes tags the reports read.
+
+### Part 4 — `counselog review` reads the same queue ✅ *(2026-10-23)*
+
+`review` now walks `checking.to_check`, so it shows the same notes, reasons
+and questions as the browser. The wording lives in `core/checking.py`
+(`QUESTIONS`, `why`, `suggestion`) and both interfaces use it. Each note is
+shown in full rather than as a 200-character preview: a judgement about what
+a note is about needs the whole note.
+
+**The old prompt defaulted to "y".** Pressing Enter confirmed the model's
+guess, which is the answer-by-habit the browser page was built to avoid. Now
+there is no default. Enter asks again, `s` skips the note, `q` stops.
+
+`tags.tags_needing_review` is gone, since nothing uses it now. Its tests
+moved onto `checking.to_check`, which covers everything it did.
+
+The third open question is answered: **offered, not started.** `counselog
+tag` ends with "N note(s) worth checking. Run `counselog review`, or open
+Check the sorting in the browser." A run can end at any hour. It says so
+once, rather than prompting.
+
+`SECURITY.md`'s known gap is restated as "a bin the model missed is caught
+only if someone checks". Misses can be found now, but nothing makes anyone
+answer, and a confident miss outside the sample stays unseen.
 
 **Out of scope here:** any training or calibration (the backlog's three levels
 build on part 1's table), changing the model, and a privacy tier (decided

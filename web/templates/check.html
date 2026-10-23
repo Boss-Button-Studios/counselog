@@ -13,16 +13,7 @@
 
     <h2>{{ item.note.occurred_at | friendly_time }}</h2>
 
-    <p class="notice" role="status">
-      {% if item.reason == "no-bin" %}
-        This note is in no bin, so it appears in no report.
-      {% elif item.reason == "unsure" %}
-        The model was not sure how to sort this note.
-      {% else %}
-        Picked at random: one note in {{ audit_one_in }} is checked whatever the model said.
-        That is the only way to find out how often it is confidently wrong.
-      {% endif %}
-    </p>
+    <p class="notice" role="status">{{ why }}</p>
 
     <div class="note-text">{{ item.note.raw_text }}</div>
 

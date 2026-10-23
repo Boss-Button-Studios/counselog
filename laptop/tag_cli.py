@@ -13,7 +13,7 @@ import time
 
 import click
 
-from core import db, judgements, models, tags
+from core import checking, db, judgements, models, tags
 from core.paths import notes_db_path
 from desktop import mirror, tagger
 from laptop.client import DesktopClient, TransportError
@@ -184,10 +184,12 @@ def _summarise(conn, done: int, total: int, untagged: list[int]) -> None:
     else:
         click.secho(f"Sorted all {done} note(s).", fg="green")
 
-    unsure = tags.tags_needing_review(conn, tagger.DEFAULT_THRESHOLD)
-    if unsure:
-        click.echo(f"{len(unsure)} guess(es) the model was unsure about. "
-                   "Check them with `counselog review`.")
+    # Offered once, here, rather than started: a run can end at any hour, and
+    # checking is better done when there is time to read.
+    waiting = checking.to_check(conn)
+    if waiting:
+        click.echo(f"{len(waiting)} note(s) worth checking. Run `counselog review`, "
+                   "or open Check the sorting in the browser.")
 
     if untagged:
         # A note in no bin appears in no report. Saying nothing here would let it
@@ -214,42 +216,59 @@ def _describe(conn, key: str, confidence: float | None) -> str:
 
 
 @click.command("review")
-@click.option("--threshold", type=float, default=tagger.DEFAULT_THRESHOLD, show_default=True,
-              help="Show guesses below this confidence.")
+@click.option("--threshold", type=float, default=checking.REVIEW_THRESHOLD, show_default=True,
+              help="Ask about answers the model gave below this confidence.")
 @click.option("--unlock-with", type=click.Choice(FACTOR_CHOICES), default=None)
 def review(threshold: float, unlock_with: str | None) -> None:
-    """Check the sorting the model was unsure about.
+    """Check the sorting: notes in no bin, answers the model was unsure of,
+    and a few picked at random to see how often it is confidently wrong.
 
-    Only shows guesses. Notes matched by name are exact and are not second
-    guessed here, so this list stays short enough to actually work through.
+    The same list as "Check the sorting" in the browser. There is no default
+    answer: Enter alone asks again, so nothing is confirmed by habit.
     """
     from laptop.unlock import open_database
 
     conn = open_database(unlock_with)
     try:
-        pending = tags.tags_needing_review(conn, threshold)
-        if not pending:
+        queue = checking.to_check(conn, threshold)
+        if not queue:
             click.secho("Nothing to check.", fg="green")
             return
 
-        click.echo(f"{len(pending)} guess(es) to check.\n")
-        for note, key, confidence in pending:
-            click.echo(click.style(f"Note {note.id} · {note.captured_at[:10]}", bold=True))
-            click.echo(f"  {_preview(note.raw_text)}")
-            click.echo(f"  Suggested bin: {_describe(conn, key, confidence)}")
-            choice = click.prompt("  Keep it?", type=click.Choice(["y", "n", "q"]),
-                                  default="y", show_choices=True)
-            if choice == "q":
+        click.echo(f"{len(queue)} note(s) to check. Answer y or n; "
+                   "s skips a note, q stops.\n")
+        for item in queue:
+            if _review_one(conn, item) == "q":
                 click.echo("Stopped. The rest are still waiting.")
                 return
-            if choice == "y":
-                tags.confirm_tag(conn, note.id, key)
-            else:
-                tags.reject_tag(conn, note.id, key)
             click.echo()
         click.secho("All checked.", fg="green")
     finally:
         conn.close()
+
+
+def _review_one(conn, item: checking.ToCheck) -> str:
+    """Put one note's questions. Returns 'q' to stop, 's' if skipped, '' if done."""
+    note = item.note
+    click.echo(click.style(f"Note {note.id} · {note.occurred_at[:10]}", bold=True))
+    click.echo(f"  {checking.why(item.reason)}")
+    click.echo()
+    for line in note.raw_text.splitlines() or [""]:
+        click.echo(f"    {line}")
+    click.echo()
+    for question in item.questions:
+        click.echo(f"  {checking.QUESTIONS[question.bin_key]}")
+        click.echo(f"  {checking.suggestion(question)}")
+        # No default, deliberately: a default is an answer given by habit.
+        choice = click.prompt("  Your answer", type=click.Choice(["y", "n", "s", "q"]),
+                              show_choices=True)
+        if choice in ("s", "q"):
+            return choice
+        if choice == "y":
+            tags.confirm_tag(conn, note.id, question.bin_key)
+        else:
+            tags.reject_tag(conn, note.id, question.bin_key)
+    return ""
 
 
 def _preview(text: str, limit: int = 200) -> str:

@@ -80,7 +80,7 @@ def test_the_limits_of_the_record_are_still_stated(text, claim):
     "outside the encryption boundary",
     "Erasure cannot be guaranteed",
     "has not been run against",
-    "A bin the model missed is never reviewed",
+    "A bin the model missed is caught only if someone checks",
     "sees note text in memory",
 ])
 def test_the_known_gaps_are_still_admitted(text, claim):

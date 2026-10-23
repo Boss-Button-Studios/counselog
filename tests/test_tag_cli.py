@@ -11,7 +11,7 @@ import pytest
 from click.testing import CliRunner
 from werkzeug.serving import make_server
 
-from core import db, models, tags
+from core import checking, db, models, tags
 from core.certs import CertPaths, server_context
 from core.crypto import Keyring, PasswordFactor
 from core.paths import keyring_path, notes_db_path
@@ -213,8 +213,68 @@ def test_review_shows_only_uncertain_guesses(ready, monkeypatch):
     _tag(ready)
 
     result = ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\ny\n")
-    assert "1 guess" in result.output
-    assert "Sarah K." not in result.output.split("Suggested bin")[1]  # the name match is not queried
+    assert "1 note(s) to check" in result.output
+    assert "The model was not sure" in result.output
+    assert "Sarah was in the retro." in result.output       # the whole note, to judge by
+    assert result.output.count("Your answer") == 1          # the name match is not queried
+
+
+def test_review_asks_about_a_note_in_no_bin_including_the_noes(ready, monkeypatch):
+    """The miss nobody could see before: confident noes, so the note is in no
+    report. Both questions are put, with what the model said."""
+    monkeypatch.setattr(tagger, "judge_self_team",
+                        lambda text, **kw: [Judgement("self", False, 0.9),
+                                            Judgement("team", False, 0.9)])
+    _note(ready, "Quiet day.")
+    _tag(ready)
+
+    result = ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\nn\ny\n")
+    assert "in no bin, so it appears in no report" in result.output
+    assert result.output.count("The model said no, 90% sure.") == 2
+    conn = _open()
+    try:
+        assert dict(tags.tags_for_note(conn, 1)) == {"team": None}
+        assert tags.decision_for(conn, 1, "self").decision == tags.EXCLUDED
+    finally:
+        conn.close()
+
+
+def test_review_has_no_default_answer(ready, monkeypatch):
+    """Enter alone must ask again, not confirm: a default is an answer given by
+    habit, and the checked answers would then measure only agreement."""
+    monkeypatch.setattr(tagger, "judge_self_team",
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
+    _note(ready, "a note")
+    _tag(ready)
+    result = ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\n\nn\n")
+    assert result.output.count("Your answer") == 2
+    conn = _open()
+    try:
+        assert tags.decision_for(conn, 1, "team").decision == tags.EXCLUDED
+    finally:
+        conn.close()
+
+
+def test_skipping_a_note_leaves_it_waiting(ready, monkeypatch):
+    monkeypatch.setattr(tagger, "judge_self_team",
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
+    _note(ready, "first")
+    _note(ready, "second")
+    _tag(ready)
+    result = ready(["review", "--unlock-with", "password"], stdin=f"{PASSWORD}\ns\ny\n")
+    assert "All checked" in result.output
+    conn = _open()
+    try:
+        assert [item.note.id for item in checking.to_check(conn)] == [1]
+    finally:
+        conn.close()
+
+
+def test_the_tag_summary_offers_the_check_rather_than_starting_it(ready, monkeypatch):
+    monkeypatch.setattr(tagger, "judge_self_team",
+                        lambda text, **kw: [Judgement("team", True, 0.4)])
+    _note(ready, "a note")
+    assert "1 note(s) worth checking. Run `counselog review`" in _tag(ready).output
 
 
 def test_keeping_a_guess_settles_it(ready, monkeypatch):
@@ -229,7 +289,7 @@ def test_keeping_a_guess_settles_it(ready, monkeypatch):
         assert "team" in dict(tags.tags_for_note(conn, 1))
         decided = {d.key: d for d in tags.tag_decisions(conn, 1)}["team"]
         assert decided.checked, "keeping a guess records that you looked"
-        assert tags.tags_needing_review(conn, 0.75) == []
+        assert checking.to_check(conn) == []
     finally:
         conn.close()
 
@@ -260,7 +320,7 @@ def test_review_can_be_stopped_part_way(ready, monkeypatch):
     assert "still waiting" in result.output
     conn = _open()
     try:
-        assert len(tags.tags_needing_review(conn, 0.75)) == 1
+        assert len(checking.to_check(conn)) == 1
     finally:
         conn.close()
 

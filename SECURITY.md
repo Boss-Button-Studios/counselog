@@ -307,11 +307,14 @@ Recorded because a threat model that lists only what is handled is marketing.
 - **Tagging is not reproducible.** The model's answer can depend on what was
   asked before it; the prompt ordering fixes the case that was measured, but a
   tag is a suggestion, not a fact, and low-confidence ones are held for review.
-- **A bin the model missed is never reviewed.** A no makes no tag, and review
-  only shows tags. Measured on fictitious notes, about half of what belongs in
-  `self` or `team` is missed this way (`bench/README.md`). Every answer is now
-  kept (schema 8, `core/judgements.py`), so the misses can be found; the
-  interface that shows them is not built yet (`tasks.md`, "the safety net").
+- **A bin the model missed is caught only if someone checks.** Measured on
+  fictitious notes, about half of what belongs in `self` or `team` is missed
+  (`bench/README.md`). Every answer is kept (schema 8), and "Check the
+  sorting" (`/check`, `counselog review`) puts the notes in no bin, the unsure
+  answers either way, and a random one in ten to a person. Nothing makes
+  anyone answer. A confident miss outside the random sample stays in the
+  record unseen, and nothing yet says how often that happens (`tasks.md`,
+  "the safety net", part 5).
 - **One user, one record.** No multi-tenancy, no sharing, no roles. Anyone who
   can unlock can do everything.
 - **No account recovery.** Deliberate.

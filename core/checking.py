@@ -204,3 +204,35 @@ def _latest_answers(conn) -> dict[tuple[int, str], _Answer]:
         latest[(int(row["note_id"]), row["bin_key"])] = _Answer(
             bool(row["said_yes"]), row["confidence"])  # later rows overwrite
     return latest
+
+
+# ── wording, shared by the web page and `counselog review` ───────────────────
+#
+# One queue, described the same way in both interfaces, so that a person who
+# uses both is never left wondering whether they are looking at two lists.
+
+QUESTIONS = {
+    "self": "Is this note about you — your own work, habits or decisions?",
+    "team": "Is this note about the team as a whole, rather than one person?",
+}
+
+
+def why(reason: str) -> str:
+    """Why a note is being shown, in a sentence."""
+    if reason == NO_BIN:
+        return "This note is in no bin, so it appears in no report."
+    if reason == UNSURE:
+        return "The model was not sure how to sort this note."
+    return (f"Picked at random: one note in {AUDIT_ONE_IN} is checked whatever the "
+            "model said. That is the only way to find out how often it is "
+            "confidently wrong.")
+
+
+def suggestion(question: Question) -> str:
+    """What the model said, as a sentence. Shown, never pre-selected."""
+    if question.model_said_yes is None:
+        return "The model's answer was not kept for this note."
+    said = "yes" if question.model_said_yes else "no"
+    if question.confidence is None:
+        return f"The model said {said}, without saying how sure it was."
+    return f"The model said {said}, {round(question.confidence * 100)}% sure."

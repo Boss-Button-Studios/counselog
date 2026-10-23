@@ -10,9 +10,13 @@ import secrets
 import httpx
 import pytest
 
-from core import db, models, protocol, tags
+from core import checking, db, models, protocol, tags
 from desktop import tagger
 from desktop.tagger import KnownPerson, Tag, TaggingUnavailable
+
+# The audit sample is drawn from hashes that include the time a note was
+# written, so a test that is not about it draws so rarely it never happens.
+NEVER_AUDIT = 10**12
 
 SARAH = KnownPerson(1, "Sarah K.", ("Sarah", "SK", "Sarah K."))
 SAM = KnownPerson(2, "Sam T.", ("Sam",))
@@ -284,8 +288,8 @@ def test_only_uncertain_guesses_need_review(conn):
     models.add_person(conn, "Sarah K.", ["Sarah"])
     note = models.add_note(conn, "a note")
     tags.set_tags(conn, note.id, [("person:1", None), ("team", 0.95), ("self", 0.4)])
-    pending = tags.tags_needing_review(conn, 0.75)
-    assert [key for _, key, _ in pending] == ["self"]
+    pending = checking.to_check(conn, 0.75, one_in=NEVER_AUDIT)
+    assert [q.bin_key for item in pending for q in item.questions] == ["self"]
 
 
 def test_confirming_a_guess_settles_it(conn):
@@ -299,7 +303,7 @@ def test_confirming_a_guess_settles_it(conn):
     tags.set_tags(conn, note.id, [("team", 0.4)])
     tags.confirm_tag(conn, note.id, "team")
 
-    assert tags.tags_needing_review(conn, 0.75) == []
+    assert checking.to_check(conn, 0.75, one_in=NEVER_AUDIT) == []
     assert "team" in dict(tags.tags_for_note(conn, note.id))
     decided = {d.key: d for d in tags.tag_decisions(conn, note.id)}["team"]
     assert decided.checked and decided.confidence is None

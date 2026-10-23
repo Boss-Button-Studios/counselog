@@ -13,8 +13,12 @@ behind a fabricated revision with `verify` still reporting clean.
 
 import pytest
 
-from core import chain, db, models, revisions, tags
+from core import checking, chain, db, models, revisions, tags
 from core.revisions import RevisionError
+
+# The audit sample is drawn from hashes that include the time a note was
+# written, so a test that is not about it draws so rarely it never happens.
+NEVER_AUDIT = 10**12
 
 KEY = bytes(range(32))
 
@@ -160,8 +164,8 @@ def test_the_review_queue_asks_about_the_current_note_only(conn, note):
     revised = revisions.revise(conn, note.id, "Ada pushed back on the timeline.")
     tags.set_tags(conn, revised.id, [("team", 0.4)])
 
-    queued = tags.tags_needing_review(conn, 0.7)
-    assert [n.id for n, _, _ in queued] == [revised.id]
+    queued = checking.to_check(conn, 0.7, one_in=NEVER_AUDIT)
+    assert [item.note.id for item in queued] == [revised.id]
 
 
 def test_a_replaced_note_is_not_sent_to_the_model_again(conn, note):

@@ -14,7 +14,11 @@ difficult conversation and one that cannot.
 
 import pytest
 
-from core import db, models, revisions, tags
+from core import checking, db, models, revisions, tags
+
+# The audit sample is drawn from hashes that include the time a note was
+# written, so a test that is not about it draws so rarely it never happens.
+NEVER_AUDIT = 10**12
 
 KEY = bytes(range(32))
 
@@ -132,13 +136,15 @@ def test_a_confirmed_tag_does_not_return_to_the_review_queue(conn, note):
     tags.set_tags(conn, note.id, [("team", 0.4)])
     tags.confirm_tag(conn, note.id, "team")
     tags.set_tags(conn, note.id, [("team", 0.4)])
-    assert tags.tags_needing_review(conn, 0.7) == []
+    assert checking.to_check(conn, 0.7, one_in=NEVER_AUDIT) == []
 
 
 def test_an_excluded_bin_is_never_offered_for_review(conn, note):
     tags.set_tags(conn, note.id, [("team", 0.4)])
     tags.reject_tag(conn, note.id, "team")
-    assert tags.tags_needing_review(conn, 0.7) == []
+    asked = [q.bin_key for item in checking.to_check(conn, 0.7, one_in=NEVER_AUDIT)
+             for q in item.questions]
+    assert "team" not in asked
 
 
 # ── across a correction ──────────────────────────────────────────────────────
@@ -170,7 +176,7 @@ def test_a_typo_fix_does_not_cost_you_your_answers(conn, note):
                   [("person:1", None), ("team", 0.3), ("self", 0.9)])
 
     assert keys_in(conn, revised.id) == ["person:1", "team"]
-    assert tags.tags_needing_review(conn, 0.7) == []
+    assert checking.to_check(conn, 0.7, one_in=NEVER_AUDIT) == []
 
 
 def test_a_correction_is_still_queued_for_sorting(conn, note):

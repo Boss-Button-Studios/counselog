@@ -43,7 +43,7 @@ def register(app) -> None:
             return render_template(
                 "check.html", caller=g.caller, item=item, remaining=len(queue),
                 passed_over=passed_over, after=after,
-                audit_one_in=checking.AUDIT_ONE_IN,
+                why=checking.why(item.reason) if item else None,
                 questions=[_shown(q) for q in item.questions] if item else [],
             )
         finally:
@@ -101,27 +101,9 @@ def _answerable(conn, note_id: int) -> bool:
     return note.id in current and not note.tombstoned
 
 
-# The questions, in the words a person would use. Fixed text, so a screen
-# reader announces the same question every time.
-QUESTIONS = {
-    "self": "Is this note about you — your own work, habits or decisions?",
-    "team": "Is this note about the team as a whole, rather than one person?",
-}
-
-
 def _shown(question: checking.Question) -> dict:
-    return {"bin_key": question.bin_key, "text": QUESTIONS[question.bin_key],
-            "reason": question.reason, "suggestion": _suggestion(question)}
-
-
-def _suggestion(question: checking.Question) -> str:
-    """What the model said, as a sentence. Never a pre-selected answer."""
-    if question.model_said_yes is None:
-        return "The model's answer was not kept for this note."
-    said = "yes" if question.model_said_yes else "no"
-    if question.confidence is None:
-        return f"The model said {said}, without saying how sure it was."
-    return f"The model said {said}, {round(question.confidence * 100)}% sure."
+    return {"bin_key": question.bin_key, "text": checking.QUESTIONS[question.bin_key],
+            "reason": question.reason, "suggestion": checking.suggestion(question)}
 
 
 def _refused(message: str):
