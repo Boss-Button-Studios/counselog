@@ -24,6 +24,7 @@ from web.access import CSRF_FIELD, sessions_of
 from web.identity import identify
 from web.ratelimit import SignInLimiter
 from web.sessions import BrowserSessions
+from web.sorting import Sorter
 from web.views import register_all
 
 SESSION_COOKIE = "counselog_session"
@@ -40,6 +41,7 @@ def create_app(*, sessions: BrowserSessions | None = None,
     app.config.update(
         SESSIONS=sessions or BrowserSessions(),
         LIMITER=SignInLimiter(),
+        SORTER=Sorter(),
         REQUIRE_TAILSCALE=require_tailscale,
         SESSION_COOKIE_NAME=SESSION_COOKIE,
         SESSION_COOKIE_HTTPONLY=True,

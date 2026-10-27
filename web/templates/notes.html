@@ -10,6 +10,13 @@
       newest first{% if cleared %}, {{ cleared }} of them cleared{% endif %}.
     </p>
 
+    {% if waiting %}
+      <p class="notice" role="status">
+        {{ waiting }} note{{ " is" if waiting == 1 else "s are" }} not sorted yet.
+        <a href="{{ url_for('sort_notes') }}">Sort new notes</a>
+      </p>
+    {% endif %}
+
     {% if in_no_bin %}
       {# A note in no bin is in no report, and nothing else on any page would
          say so. #}
@@ -54,6 +61,7 @@
     <a href="{{ url_for('home') }}">Write a note</a> ·
     <a href="{{ url_for('people_list') }}">People</a> ·
     <a href="{{ url_for('reports_dashboard') }}">Reports</a> ·
+    <a href="{{ url_for('sort_notes') }}">Sort new notes</a> ·
     <a href="{{ url_for('check_sorting') }}">Check the sorting</a> ·
     <a href="{{ url_for('verify_record') }}">Check the record</a> ·
     <a href="{{ url_for('device_list') }}">Browsers</a> ·

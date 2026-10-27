@@ -8,6 +8,11 @@ short:
   - an absolute cap that renewal cannot push past
   - the key is dropped entirely once the last session ends
 
+One thing may hold a copy for longer than the idle timeout: sorting, which runs
+for minutes after the page that started it (`lend`). Its copy still ends when
+that sign-in would have, at the absolute cap, and signing out or Lock ends it at
+once.
+
 Capture does not need any of this — a note can be written while locked, which is
 what makes a five-minute idle timeout livable rather than infuriating.
 """
@@ -52,6 +57,9 @@ class BrowserSessions:
         self._idle = idle_seconds
         self._absolute = absolute_seconds
         self._sessions: dict[str, tuple[str, DekSession, float]] = {}
+        # Copies of a session's key lent to work that outlasts a page view,
+        # by the session they came from, so signing out can end them.
+        self._lent: dict[str, list[DekSession]] = {}
         self._lock = threading.Lock()
 
     def sign_in(self, caller: str, dek: bytes) -> str:
@@ -82,6 +90,36 @@ class BrowserSessions:
                 self._drop(session_id)
                 raise NotSignedIn(str(exc)) from exc
 
+    def lend(self, session_id: str | None) -> DekSession:
+        """A copy of the key for background work, ending when this sign-in
+        would have ended at the latest.
+
+        The copy does not renew the browser's session, so a browser left alone
+        still locks after the idle timeout while the work carries on. It is
+        never longer-lived than the sign-in it came from: its one deadline is
+        that sign-in's absolute cap. Signing out of that session, or Lock,
+        closes it at once.
+        """
+        if not session_id:
+            raise NotSignedIn("Sign in to read your notes.")
+        with self._lock:
+            entry = self._sessions.get(session_id)
+            if entry is None:
+                raise NotSignedIn("Your session has ended. Sign in again.")
+            _, session, created = entry
+            remaining = self._absolute - (time.monotonic() - created)
+            try:
+                dek = session.dek
+            except (SessionExpired, SessionClosed) as exc:
+                self._drop(session_id)
+                raise NotSignedIn(str(exc)) from exc
+            if remaining <= 0:
+                raise NotSignedIn("Your session has ended. Sign in again.")
+            copy = DekSession(dek, ttl_seconds=remaining, max_lifetime=remaining)
+            live = [lent for lent in self._lent.get(session_id, []) if not lent.expired]
+            self._lent[session_id] = [*live, copy]
+            return copy
+
     def info(self, session_id: str | None) -> SessionInfo | None:
         with self._lock:
             entry = self._sessions.get(session_id or "")
@@ -101,6 +139,7 @@ class BrowserSessions:
 
     def sign_out(self, session_id: str | None) -> bool:
         with self._lock:
+            self._recall(session_id or "")
             if not session_id or session_id not in self._sessions:
                 return False
             self._drop(session_id)
@@ -112,6 +151,8 @@ class BrowserSessions:
             count = len(self._sessions)
             for session_id in list(self._sessions):
                 self._drop(session_id)
+            for session_id in list(self._lent):
+                self._recall(session_id)
             return count
 
     def any_open(self) -> bool:
@@ -124,6 +165,15 @@ class BrowserSessions:
         entry = self._sessions.pop(session_id, None)
         if entry is not None:
             entry[1].close()
+
+    def _recall(self, session_id: str) -> None:
+        """Close every copy lent from this session. Caller must hold the lock.
+
+        Not part of `_drop`, which also runs when a session merely times out:
+        a browser going idle is not someone asking for the work to stop.
+        """
+        for lent in self._lent.pop(session_id, []):
+            lent.close()
 
     def _prune(self) -> None:
         """Caller must hold the lock."""

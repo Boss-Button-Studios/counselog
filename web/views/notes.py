@@ -33,7 +33,8 @@ def register(app) -> None:
             return render_template(
                 "notes.html", caller=g.caller, threads=threads,
                 cleared=sum(1 for t in threads if t.current.tombstoned),
-                in_no_bin=checking.count_in_no_bin(conn))
+                in_no_bin=checking.count_in_no_bin(conn),
+                waiting=len(models.unprocessed_notes(conn)))
         finally:
             conn.close()
 

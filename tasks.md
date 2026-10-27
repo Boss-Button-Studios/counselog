@@ -1515,6 +1515,40 @@ v8 migration on a v7 database, with a v7 record's existing tags intact.
 - Whether the queue is offered after each sorting run, or waits to be visited.
   Being offered is more likely to be used; it is also a nag.
 
+## Sorting from the browser ✅ *(2026-10-27)*
+
+Asked for 2026-10-27, after notes written in the browser sat unsorted: sorting
+could only be started from a terminal. "Really almost everything a user would
+do day to day should be there."
+
+- `/sort` (**Sort new notes**, linked from the home and notes pages, and the
+  notes page says how many are waiting). It runs in the background in the
+  browser service (`web/sorting.py`) and asks the model on this machine
+  directly, not through `counselogd`: the browser service already runs beside
+  the model, and the service would only mean lending the key to a second
+  process.
+- One run at a time. Stop takes effect after the note in hand.
+- The key: a copy lent by the session that pressed Sort, ending at that
+  sign-in's 30-minute cap, or sooner on sign-out or Lock. The browser still
+  locks after five idle minutes while the run carries on. An answer that
+  arrives after the key was closed is dropped, not written. See SECURITY.md §5.
+- The page does not refresh itself (it would defeat the idle timeout).
+- `core/filing.py`: `counselog tag` and the browser file a note the same way.
+
+A long run is cut off by the 30-minute cap, at roughly 15 to 30 notes. What
+was sorted is kept, and signing in and pressing Sort again carries on.
+
+**What the browser still cannot do**, from going through every command:
+- Day to day, nothing left except `import` (a text file as a note). That could
+  be an upload on the write page.
+- Occasional, and fine in a terminal: `doctor`, `keys`, `certs`, `init`,
+  `status` (the browser has `/status` already).
+- Signing (`sign`, `sign-request`, `sign-offline`, `sign-attach`) needs the
+  YubiKey, which never touches this machine. A browser cannot reach a PIV key
+  on another machine, so these stay on the laptop.
+- `sync` is for a record kept on the laptop. With the record here it is not a
+  day-to-day step.
+
 ## Phase 8 — Harden + docs 🟨
 
 Real two-machine run, docs pass. `SECURITY.md` ✅.

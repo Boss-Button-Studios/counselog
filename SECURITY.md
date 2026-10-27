@@ -210,6 +210,12 @@ nothing about being allowed to read anything.
 - Sessions: **5 minutes idle**, refreshed by use, and **30 minutes absolute**.
   The signing secret is regenerated per process, so restarting the service seals
   every session.
+- **Sorting from the browser holds a copy of the key past the idle timeout.**
+  Pressing Sort lends the run a copy (`BrowserSessions.lend`) so it can carry on
+  after the page locks, for the one to two minutes each note takes. The copy
+  never outlives that sign-in's 30-minute cap, and signing out or Lock closes
+  it at once. The sort page does not refresh itself, since a page that reloaded
+  on its own would keep the notes readable for as long as it was left open.
 - Sign-in is rate limited to protect *memory*, not just guesses: scrypt at these
   parameters costs 128 MB per attempt, so concurrent attempts are capped at 2,
   with 5 attempts per 5 minutes and a 60-second lockout after that.
@@ -238,6 +244,7 @@ Being specific about this is more useful than any assurance.
 | Where | When | For how long |
 |---|---|---|
 | Laptop memory | While signed in | Until the idle timeout, lock, or process exit |
+| Browser service memory | While a sort started from the browser runs | Until it finishes, Stop, sign-out, Lock, or 30 minutes after that sign-in |
 | Desktop memory | During a tagging or report session | Until the session TTL expires or the process stops |
 | The spool file | A note written while locked | Until the next drain, then the body is cleared in place |
 | Spool quarantine | An entry that failed its checks | Kept — its ciphertext is the only copy of what may be a genuine note |

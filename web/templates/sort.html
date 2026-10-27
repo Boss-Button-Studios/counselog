@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Sort new notes · Counselog{% endblock %}
+{% block content %}
+
+  <h1>Sort new notes</h1>
+
+  <p class="aside">
+    Sorting puts each note in the bins it belongs to: the people it names, and
+    whether it is about you or the team. Names you have listed are matched
+    straight away. Whether a note is about you or the team is asked of the
+    language model on this machine, which takes one to two minutes a note.
+    Nothing leaves this machine.
+  </p>
+
+  {% if progress and progress.running %}
+    <p class="notice" role="status">
+      Sorting: {{ progress.done }} of {{ progress.total }} done.
+      You can leave this page and come back. Each note is saved as it is sorted.
+    </p>
+    <p>
+      <a href="{{ url_for('sort_notes') }}">See how far it has got</a>
+    </p>
+    <form method="post" action="{{ url_for('stop_sorting') }}">
+      <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+      <button type="submit" class="quiet">Stop after this note</button>
+    </form>
+    <p class="aside">
+      Signing out or pressing Lock also stops it. Letting this page lock on its
+      own does not.
+    </p>
+  {% else %}
+    {% if progress %}
+      <p class="notice" role="status">
+        {% if progress.stopped_because %}
+          Sorted {{ progress.done }} of {{ progress.total }}. {{ progress.stopped_because }}
+        {% else %}
+          Sorted all {{ progress.done }} note{{ "" if progress.done == 1 else "s" }}.
+        {% endif %}
+        {% if progress.in_no_bin %}
+          {{ progress.in_no_bin }} ended up in no bin, so
+          {{ "it appears" if progress.in_no_bin == 1 else "they appear" }} in no report.
+        {% endif %}
+      </p>
+    {% endif %}
+
+    {% if waiting %}
+      <p>{{ waiting }} note{{ " is" if waiting == 1 else "s are" }} waiting to be sorted.</p>
+      <form method="post" action="{{ url_for('start_sorting') }}">
+        <input type="hidden" name="{{ csrf_field }}" value="{{ csrf_token }}">
+        <button type="submit">Sort {{ "it" if waiting == 1 else "them" }}</button>
+      </form>
+    {% else %}
+      <p>Every note is sorted.</p>
+    {% endif %}
+  {% endif %}
+
+  {% if to_check %}
+    <p>
+      {{ to_check }} note{{ " is" if to_check == 1 else "s are" }} worth checking.
+      <a href="{{ url_for('check_sorting') }}">Check the sorting</a>
+    </p>
+  {% endif %}
+
+  <p class="aside"><a href="{{ url_for('note_list') }}">Back to your notes</a></p>
+
+{% endblock %}
