@@ -14,6 +14,13 @@ stop. Read this before changing anything in `core/crypto/`, `core/chain.py`,
 
 ---
 
+**This document describes engineering choices, not compliance.** Counselog is
+not warranted to meet any jurisdiction's legal or regulatory standards for
+handling sensitive or personal information. See the README, "No compliance
+claim".
+
+---
+
 ## 1. What is being protected, and from whom
 
 **The asset is the note text**, and after it, the metadata around it: who a note

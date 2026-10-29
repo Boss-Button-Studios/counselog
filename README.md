@@ -43,3 +43,24 @@ fail. Lingering must be on for them to run while you are logged out
 
 Restarting the browser interface signs every browser out. That is deliberate:
 its session keys exist only in memory.
+
+## No compliance claim
+
+Counselog is not warranted to meet any jurisdiction's legal or regulatory
+standards for handling sensitive or personal information. That includes data
+protection and privacy law, employment and labour law, and rules on keeping
+records about employees. Encryption, a tamper-evident record and the other
+protections described in `SECURITY.md` are engineering choices. They are not
+a certification, and they do not make any use of this tool lawful where you
+are.
+
+If you keep notes about other people with it, you are responsible for knowing
+and meeting the rules that apply to you: what you may record, how long you may
+keep it, who may see it, and what the people it is about may ask for. Check
+with your employer, your HR department or a lawyer. Nothing in this project is
+legal advice.
+
+## Licence
+
+MIT, see `LICENSE`. The software is provided as is, without warranty of any
+kind.
