@@ -13,31 +13,205 @@ digests. See `counselog-tech-spec.md` for the design, `CLAUDE.md` for the rules.
 machines, one report (per-person digest), one dashboard metric (note frequency
 and recency). Everything else deferred until real notes exist to design against.
 
----
+**How it runs now, which is not quite the spec's picture.** Since phase 5 the
+record lives on the desktop, and the browser interface served from there over
+the tailnet is the main way in: writing, reading, sorting, checking, reports.
+The laptop's part is the YubiKey, which signs the record through
+`sign-request` / `sign-offline` / `sign-attach`, since the desktop has no
+USB-C port. The laptop-holds-the-record path of the spec (`sync`, the mirror,
+`counselogd`) still works and is tested, but nothing uses it day to day.
 
-## Phase Status
-
-| Phase | Status | Machine |
-|---|---|---|
-| Phase 0 — Scaffold | ✅ Complete | desktop |
-| Phase 1 — Crypto core | ✅ Complete (53 tests, 89% cov) | desktop (password + stub) |
-| Phase 2 — Storage + hash chain | ✅ Complete (131 tests, 89% cov) | desktop |
-| Phase 3 — Transport + mirror | ✅ Complete (184 tests, 89% cov) | desktop (loopback) |
-| Phase 4 — Bin tagging | ✅ Complete (250 tests, 90% cov) | desktop |
-| Phase 5 — Web foundation | ✅ Complete (283 tests, 90% cov) | desktop |
-| Phase 6 — The browser interface | ✅ Complete (567 tests, 91% cov) | desktop |
-| Phase 7 — PIV signing | ✅ Complete — first hardware signature 2026-10-21 | laptop — needs the YubiKey |
-| Phase 8 — Harden + docs | 🟨 `SECURITY.md` done | both |
-
-Phases 0–6 are buildable entirely on the desktop. Only phase 7 needs the laptop,
-which is now the whole of what is left before hardening.
-
-Phase 6 absorbed what earlier drafts listed as separate reports and read-UI
-phases. Once the interface moved to a browser (phase 5), a "Flask read UI" was
-no longer a phase of its own — it is what phase 6 builds — and reports are pages
-in it rather than a thing that comes first.
+This file has two halves. **Where it stands** and **What is next** are the
+current state, and are the part to keep up to date. **How it was built** is
+the record of each phase and what was learned, in the order it happened.
 
 ---
+
+## Where it stands *(2026-10-29)*
+
+| Work | Status |
+|---|---|
+| Phases 0–4 — scaffold, crypto, storage and chain, transport, bin tagging | ✅ |
+| Phase 5 — web foundation | ✅ |
+| Phase 6 — the browser interface: capture, reading, editing, people, reports | ✅ |
+| Phase 7 — PIV signing. First hardware signature 2026-10-21 | ✅ |
+| Re-measuring binning on the Radeon VII (`bench/`) | ✅ measured; the switch to llama.cpp waits |
+| The safety net: checking the sorting (schema 8) | ✅ 2026-10-23 |
+| Both services as systemd user units | ✅ 2026-10-23 |
+| Sorting from the browser | ✅ 2026-10-27 |
+| Phase 8 — harden + docs | 🟨 `SECURITY.md` done |
+
+827 tests. Schema version 8, service version 4.
+
+Tested in use: the browser over the tailnet from away from home
+(2026-10-27), and sorting from the browser on notes the owner wrote, all
+sorted correctly. The running copy is still a test bed with no real notes.
+
+---
+
+## What is next
+
+Everything open, in one place. The history below says where each item came
+from; this list is what to work from.
+
+### Before real notes go in
+
+- **A production instance beside a development one.** Raised 2026-10-22. So
+  far the running copy has been a test bed, so a restart or a schema change
+  loses nothing. Once real notes go in, the real record wants a copy of its
+  own on this machine, and this folder stays for development. What exists,
+  and what is in the way:
+  - *Three locations, three overrides.* Data (keyring, databases, spool) goes
+    to `COUNSELOG_HOME`, by default `~/.local/share/counselog`
+    (`core/paths.py`). Settings come from `COUNSELOG_ENV_FILE`, by default the
+    `.env` in the checkout (`core/config.py`). Certificates come from
+    `COUNSELOG_CERTS`, by default `certs/` in the checkout (`core/certs.py`).
+    Settings and certificates already follow the checkout. **Data does not:**
+    every checkout shares the one default home, so today a development copy
+    and a production copy would open the same record.
+  - *`COUNSELOG_HOME` cannot go in `.env`.* `load_env()` runs only when a
+    network setting is first read, so a home set in `.env` takes effect only
+    if a network setting happens to be read before the first path. That
+    depends on the command, which is exactly what Law 7 forbids. Fix it
+    before relying on it: load `.env` once at startup in each entry point, or
+    make `counselog_home()` load it too.
+  - *Production as its own checkout*, of a tagged commit with its own `.venv`,
+    so editing this folder never changes the code that holds the record. It
+    keeps the default home. Development gets a home inside this folder
+    (gitignored), so its schema can run ahead: migrations only go forward,
+    and a newer database refuses to open in an older build.
+  - *Separate certificate authorities.* If each instance runs its own CA, a
+    development client cannot reach the production service at all. This is
+    mutual TLS doing the job it already does, not a new check. They also
+    need different ports.
+  - *Say which one it is.* A real note typed into the development copy is
+    in the wrong record, and moving it means a tombstone in one record and
+    a re-entry in the other. The web pages and the CLI should name the
+    instance when it is not production (Guideline 2). A step further: a git
+    working tree could refuse the default home unless told to use it.
+  - *The services.* `deploy/install-user-services` installs `counselog-web`
+    and `counselog-desktop` for whichever checkout runs it, and running it
+    from another checkout repoints them. A second instance needs its own unit
+    names, data folder and port, so the script will need an instance name.
+  - *The YubiKey.* Both instances would ask the same key. **Owner to
+    decide:** development unlocks by password only, or gets a slot of its own.
+- **Phase 8, what is left.** The real two-machine run, and the docs pass.
+  Three items from `SECURITY.md` §7 to act on rather than only recommend: a
+  tailscale ACL limiting the port to the devices in use; encrypting this
+  machine's swap (outside this program, but the `mlock` in `DekSession` only
+  narrows the window, phase 5); and deciding whether Flask's development
+  server is enough for one person on a private tailnet, or a real WSGI server
+  goes in front.
+- **Retire the old service path, or keep it on purpose.** Phase 5 said "the
+  old mTLS service is untouched so the laptop keeps working; phase 9 retires
+  it." There is no phase 9 in this file. With the record on the desktop and
+  sorting done in the browser, `counselogd` is now used only by `counselog
+  tag` and `sync`. Either keep it, deliberately, for a laptop that holds a
+  record of its own, or remove it and the mirror. Removing it is a real
+  reduction in what holds the key.
+
+### Owner to decide
+
+- **The bench labels.** Eight `ARGUABLE` labels in `bench/pmo.py` are proposed
+  and not yet reviewed (07-21, 07-23 and 09-19 from the first file; 01-06,
+  09-28, 02-10, 10-02 and 10-05 from the expansion). Plus 09-23 ("thanked the
+  whole team"), labelled firm "neither" though every model says team.
+- **Two safety-net defaults**, each one constant to change. The audit rate is
+  1 in 10 (`checking.AUDIT_ONE_IN`). An unsure no uses the same threshold as
+  an unsure yes. A missed bin is the costlier mistake, which argues for a
+  looser one; the trust figure on the Reports page is what will say whether
+  that is needed.
+
+### Wanted, not scheduled
+
+Roughly cheapest and most useful first.
+
+- **Re-match aliases over notes already sorted.** A new alias reaches only
+  notes sorted after it is added (found in safety net part 3). String
+  matching, no model, so cheap. Not done yet because it changes tags the
+  reports read.
+- **Digests for the `self` and `team` bins.** Only the per-person digest has a
+  page. `core/reports` works on any bin key, so it is a route and a heading,
+  and `trust.describe` is the sentence to put on them.
+- **`verify` names the signing key.** It says how far the record is signed,
+  not by which key. The same thing with one key; not once a second device
+  signs, which is allowed.
+- **File import in the browser.** The one day-to-day command the browser
+  lacks. `counselog import` exists, one file to one note, with
+  `--third-party` setting `source_trust`. Spec §7 scoped sanitization to
+  self-authored text, and a file from elsewhere is the case that scoping
+  deferred, so this is not purely an interface job.
+- **What the notes ask of the tool.** The PMO expansion set (2026-10-22)
+  showed notes carrying instructions for their own processing:
+  - *Note length and sentiment per person, over time.* "I write more words
+    about people when I'm worried about them." The length half needs no
+    model: a count over the record, deterministic and cheap. The first
+    analysis worth building.
+  - *Follow-ups.* Nearly every note ends with one, often dated ("Revisit with
+    Sam Friday Oct 23"). A digest that cannot tell an open follow-up from a
+    closed one is missing the part a supervisor rereads most.
+  - *A record skewed to problems.* "Reviewing these notes it's like 70%
+    problems. That's not a true picture of anyone." A report that surfaces
+    this helps the record be fair; one that only summarises would amplify it.
+- **Move the tagger to llama.cpp.** gemma4 12b there is about 50x faster than
+  the shipping deepseek-r1:14b on Ollama and no less accurate on what was
+  measured (`bench/README.md`). A backend setting in `core/config` and a
+  second request builder. It also matters for sorting from the browser: at
+  two seconds a note, the 30-minute cap on a run stops mattering. Waits on
+  the bench labels above and on the trust figure, so the switch is judged on
+  measured misses.
+- **Learning from review.** Three levels, cheapest first, none worth building
+  until there are real checked notes to fit:
+  1. *Calibration.* One temperature per question, fitted to past answers so
+     that a confidence of 0.9 is right nine times in ten. Plain arithmetic,
+     no dependency, and it is what makes `REVIEW_THRESHOLD` mean something. A
+     few dozen checked answers.
+  2. *Examples in the prompt.* A handful of the owner's past answers with each
+     new note. No training; costs prompt length.
+  3. *Fine-tuning.* Where Laya's accuracy jumps (0.36 → 0.77 on its own
+     benchmark). Hundreds of examples, and PyTorch in something that ships: a
+     Law 9 decision, not a bench one.
+
+  Both things it was waiting on are settled by the safety net: every answer
+  is kept beside the person's (part 1), and the audit sample means the
+  examples are not only the model's yeses (part 2). One constraint stays:
+  **trained weights are sensitive data.** A model fitted to the notes encodes
+  something about them, so it needs the DEK's protection, encrypted at rest.
+  Temperatures (level 1) say little; fine-tuned weights (level 3) say much
+  more. Training is local only: Laya's own notebook runs on Kaggle, which
+  would send the notes off the machine (Law 2).
+- **A polished digest.** Having the local model smooth a digest would need a
+  prompt, a schema-constrained response, and a page that makes unmistakably
+  clear which words are the record's and which are the model's, because the
+  whole value of the digest is that it is the former. Worth doing once there
+  are enough notes to judge whether the raw version is hard to read.
+- **Offline spelling and grammar help.** Wanted more now editing makes a
+  permanent revision. Must not be the browser's (it sends text to servers;
+  phase 6 part 3). The local model could do it, but that is a slow round
+  trip for a typo.
+- **Reprocessing on much weaker hardware.** Every correction is re-sorted, a
+  deliberate trade. Someone on a machine that struggles would want the
+  choice, so the policy should stay in one obvious place.
+- **Small asymmetries, left on purpose.** `counselog people add` has no
+  `--pronouns`, and there is no `people edit`; the browser is where people
+  are edited. Pronouns are not sent to the mirror; revisit when reports
+  start writing sentences about people.
+
+### Settled, so not to be reopened by accident
+
+- **No extra privacy tier** (2026-10-22). Counselog is eyes-only already; a
+  `Visibility: Private` marker in a note is note text and stays note text.
+- **The queue is offered after a sort, not started** (safety net part 4).
+- **A corrected note is always re-sorted** (phase 6 part 3, slice 5).
+- **"No bin matched" can now be told from "the model changed its mind"**:
+  every answer, with its confidence, is kept (safety net part 1).
+
+---
+
+# How it was built
+
+Each phase in the order it happened, with the decisions and what was found.
+Kept as written at the time; where something has since changed, a note says so.
 
 ## Phase 0 — Scaffold ✅
 
@@ -348,6 +522,8 @@ them by alias alone at no model cost.
     requests, and cannot be switched off from here. Recorded in the tagger's
     docstring. It is why tags are reviewed, why re-tagging replaces rather than
     accumulates, and why no part of the interface promises repeatability.
+    *(Since found and fixed: the cause was the prompt's shared prefix. See
+    "Phase 4, revisited".)*
 
 11. **A desktop left running across an update serves its old endpoints.**
     `./counselog tag` failed with "No such endpoint" against a `counselogd`
@@ -369,7 +545,8 @@ them by alias alone at no model cost.
 
 14. **A note matching no bin vanished silently.** It appears in no report and
     `review` never shows it, because there is no guess to review. `tag` now
-    lists them and says they will not appear in any report.
+    lists them and says they will not appear in any report. *(Since then the
+    safety net puts every note in no bin in front of a person.)*
 
 15. **Progress output padded with spaces**, so the tail of a longer previous
     line showed through. Now erases to end of line, and only in a terminal.
@@ -404,7 +581,10 @@ refusing afterwards would still let an attacker spend the memory.
 **Locking is aggressive because capture will not need it.** 5 minutes idle,
 30 minutes absolute, key dropped when the last session ends, and Lock ends every
 session rather than just the current one — pressing Lock means close the notes,
-and leaving another browser holding the key would not be that.
+and leaving another browser holding the key would not be that. *(One
+exception since: a sort started from the browser holds a copy of the key
+past the idle timeout, never past the 30 minutes. See "Sorting from the
+browser".)*
 
 Two small bugs found by running it: Flask injects its own `session` into every
 template, silently shadowing ours wherever a route did not pass one (renamed to
@@ -412,8 +592,8 @@ template, silently shadowing ours wherever a route did not pass one (renamed to
 `{}`, which is truthy, so the startup check reported "serving something, but not
 this port" when nothing was served at all.
 
-**Not yet done:** `tailscale serve` needs one privileged setup step on this
-machine before any browser can reach it.
+**Not yet done** at the time: `tailscale serve` needed one privileged setup
+step before any browser could reach it. *(Since done.)*
 
 ## Phase 6 — The browser interface
 
@@ -840,167 +1020,8 @@ and is now `tags.decision_for`, where the report needed it too.
 Part 4 is complete, and with it phase 6. Everything left before hardening needs
 the laptop and the key in it.
 
-### Re-measuring binning on new hardware (2026-10-21) 🟨
 
-The desktop now has a Radeon VII (16 GB) and a llama.cpp router beside Ollama.
-`bench/` can ask either (`--backend`), and gained a 32-note PMO test set
-(`bench/data/pmo_notes.md`, fictitious, generated outside the project), a
-logprob classifier, and a Laya run in its own venv. Numbers and caveats are in
-`bench/README.md`; the short version:
-
-- **gemma4 12b on llama.cpp is ~50x faster than the shipping default** and no
-  less accurate on what we can measure: 68/70 at under 2 s a note, against
-  deepseek-r1:14b's 100–215 s on Ollama.
-- **No method yet makes review catch the mistakes that matter.** gemma is
-  confidently wrong; Laya is honestly uncertain but misses plain cases.
-- **Update 2026-10-22, with 50 more notes (14 firm yeses in 88):** every
-  method finds only about half the notes that belong in self or team. The
-  earlier near-perfect scores came from a set with almost no positives. A
-  missed bin makes no tag, so review never sees it — which makes the backlog's
-  "labels only exist where the model said yes" a product problem, not just a
-  training one: the self and team bins are silently half empty.
-
-Nothing in `desktop/tagger.py` has changed. Moving it to llama.cpp is a backend
-setting in `core/config` and a second request builder, and waits on the above.
-
-Open: the three ARGUABLE labels in `bench/pmo.py` (07-21, 07-23, 09-19) and
-09-23 ("thanked the whole team" — firm "neither", but every model says team).
-
-### Backlog — wanted, not scheduled
-
-Raised while playtesting; recorded so they are not rediscovered later.
-
-- **Offline spelling and grammar help.** Wanted more once editing means a
-  permanent revision rather than a silent fix. Must not be the browser's, for
-  the reason above. The local model could do it, but that is a slow round trip
-  for a typo, so this needs thought rather than an obvious answer.
-- **Reprocessing on much weaker hardware.** Re-sorting every correction is a
-  deliberate trade: local inference is slow (deepseek-r1:14b measured at ~88 s a
-  note) and the machine's time is what it is for. Someone running this on a
-  laptop that struggles would want the choice, which means the policy wants to
-  stay in one obvious place rather than spread across the edit path.
-- **File ingest in the browser.** `counselog import` already exists in the CLI,
-  one file to one note, with `--third-party` setting `source_trust` so the
-  stronger sanitization of spec §10 can be applied later. The browser has no
-  equivalent. Note that spec §7 deliberately scoped sanitization to
-  self-authored text; a file arriving from elsewhere is the case that scoping
-  was deferring, so this is not purely an interface job.
-- **A polished digest.** A digest read aloud is a wall of raw notes. Having the
-  local model smooth it would need a report endpoint on the desktop, a prompt, a
-  schema-constrained response and the session handshake that hands over the DEK
-  — and then a page that makes unmistakably clear which words are the record's
-  and which are the model's, because the whole value of the digest is that it is
-  the former. Worth doing once there are enough notes to judge whether the raw
-  version is actually hard to read.
-- **"No bin matched" still cannot be told from "the model changed its mind."**
-  Much narrower since the note-first fix (see phase 4 below), but not gone: an
-  empty answer prints the same line whether the model considered the note and
-  declined it or simply answered differently this time. The model does return a
-  confidence on its "no" — `self: false` at 0.8 — and nothing records or shows
-  it. Cheap to improve whenever the tagging output is next touched.
-- **Digests for the `self` and `team` bins.** Notes sort into three kinds of
-  bin, and only the per-person one has a page. §9 asks for exactly one report,
-  so this is scope rather than an oversight — `core/reports` already works on
-  any bin key, so it is a route and a heading when it is wanted.
-
-- **Clues the notes leave about how to read them.** The PMO expansion set
-  (2026-10-22) showed notes carrying instructions for their own processing,
-  written by the supervisor to their future self. Each is a feature someone
-  will want, and each is a way the tool could misread its own record:
-  - *Follow-ups.* Nearly every note ends with one, and they are action items
-    with an owner (the writer) and often a date ("Revisit with Sam Friday Oct
-    23"). A digest that cannot tell an open follow-up from a closed one is
-    missing the part a supervisor rereads most.
-  - *Requests for analysis.* "I write more words about people when I'm worried
-    about them … I want whatever this tool becomes to help me see that." Note
-    length and sentiment per person, over time, is the first analysis worth
-    building — and the length half needs no model at all: it is a count over
-    the record, deterministic and cheap (Law 7, Guideline 3).
-  - *Self-observations about bias.* "Reviewing these notes it's like 70%
-    problems. That's not a true picture of anyone." A report that surfaces this
-    pattern helps the record be fair; one that only summarises would amplify it.
-  - *Privacy markers.* Three entries say `Visibility: Private`. **Decided
-    2026-10-22: no extra privacy tier.** Counselog is eyes-only already; a
-    second level inside it would be a promise about who reads which note that
-    nothing else in the design is built to keep. A marker like this is note
-    text and stays note text.
-
-- **A production instance beside a development one.** Raised 2026-10-22. So
-  far the running copy has been a test bed with no real notes, so a restart or
-  a schema change loses nothing. Once real notes go in, the real record wants
-  a copy of its own on this machine, and this folder stays for development.
-  What exists, and what is in the way:
-  - *Three locations, three overrides.* Data (keyring, databases, spool) goes
-    to `COUNSELOG_HOME`, by default `~/.local/share/counselog`
-    (`core/paths.py`). Settings come from `COUNSELOG_ENV_FILE`, by default the
-    `.env` in the checkout (`core/config.py`). Certificates come from
-    `COUNSELOG_CERTS`, by default `certs/` in the checkout (`core/certs.py`).
-    Settings and certificates already follow the checkout. **Data does not:**
-    every checkout shares the one default home, so today a development copy
-    and a production copy would open the same record.
-  - *`COUNSELOG_HOME` cannot go in `.env`.* `load_env()` runs only when a
-    network setting is first read, so a home set in `.env` takes effect only
-    if a network setting happens to be read before the first path. That
-    depends on the command, which is exactly what Law 7 forbids. Fix it
-    before relying on it: load `.env` once at startup in each entry point, or
-    make `counselog_home()` load it too.
-  - *Production as its own checkout*, of a tagged commit with its own `.venv`,
-    so editing this folder never changes the code that holds the record. It
-    keeps the default home. Development gets a home inside this folder
-    (gitignored), so its schema can run ahead: migrations only go forward,
-    and a newer database refuses to open in an older build.
-  - *Separate certificate authorities.* If each instance runs its own CA, a
-    development client cannot reach the production service at all. This is
-    mutual TLS doing the job it already does, not a new check. They also
-    need different ports.
-  - *Say which one it is.* A real note typed into the development copy is
-    in the wrong record, and moving it means a tombstone in one record and
-    a re-entry in the other. The web pages and the CLI should name the
-    instance when it is not production (Guideline 2). A step further: a git
-    working tree could refuse the default home unless told to use it.
-  - *The services.* `deploy/install-user-services` (2026-10-23) installs
-    `counselog-web` and `counselog-desktop` as user units for whichever
-    checkout runs it, and running it from another checkout repoints them.
-    A second instance needs its own unit names, data folder and port, so
-    the script will need an instance name.
-  - *The YubiKey.* Both instances would ask the same key. Decide whether
-    development unlocks by password only, or gets a slot of its own.
-
-- **Learning from review.** Every review is already a labelled example:
-  `note_tags` rows with `decided_by = 'person'` and `decision` included or
-  excluded. Three levels, cheapest first, and none worth building until there
-  are real reviewed notes to fit:
-  1. *Calibration.* One temperature per question, fitted to past decisions so
-     that a confidence of 0.9 is right nine times in ten — the step Laya's card
-     says fixes its overconfidence, and it would tune gemma's logprobs the same
-     way. Plain arithmetic, no dependency, and it is what makes
-     `DEFAULT_THRESHOLD` mean something. A few dozen reviewed decisions.
-  2. *Examples in the prompt.* Show the model a handful of the owner's past
-     decisions with each new note. No training; costs prompt length.
-  3. *Fine-tuning.* Where Laya's accuracy jumps (0.36 → 0.77 on its own
-     benchmark). Hundreds of examples, and PyTorch in something that ships —
-     a Law 9 decision, not a bench one.
-
-  Two things have to be settled first:
-  - ✅ *Settled by the safety net, part 1 (schema 8).* **Review currently destroys the data calibration needs.** `confirm_tag`
-    and `reject_tag` set `confidence` to NULL (`core/tags.py`), on purpose, so
-    a decision cannot be mistaken for a guess. But that discards the model's
-    number at exactly the moment it acquires a right answer to be scored
-    against. The fix is to keep the guess beside the decision — a column or a
-    history table, a schema migration either way — not to stop clearing it.
-  - **Labels only exist where the model said yes.** A no makes no tag, so it is
-    never reviewed, so a miss never becomes an example. Anything trained on
-    review alone learns from a biased sample. Some way to look at untagged
-    notes is needed, or the misses stay invisible to training as well as to
-    the reader.
-
-  And one constraint on all of it: **trained weights are sensitive data.** A
-  model fitted to the notes encodes something about them, so it needs the
-  DEK's protection — encrypted at rest, never left readable on the desktop,
-  whose mirror is meant to be inert ciphertext after a reboot. A handful of
-  temperatures (level 1) say little; fine-tuned weights (level 3) say much
-  more. Training is local only: Laya's own notebook runs on Kaggle, which
-  would send the notes off the machine (Law 2).
+## Found in use, September 2026
 
 ### Found while sorting a real record: `tag` could only be the laptop
 
@@ -1087,6 +1108,7 @@ for a `coverage` variable the old view never passed. Editing templates under a
 running service is enough to break it. The 500 was the right behaviour: had
 Jinja rendered the missing variable as empty, the page would have quietly
 dropped its "who vouched for this" section and looked fully checked.
+
 
 ## Phase 7 — PIV signing *(laptop)* ✅
 
@@ -1237,9 +1259,14 @@ only a hash crossed between the machines.
 Noticed while reading that output: `verify` says *how far* the record is signed
 but not *by which key*. With one key that is the same thing; once a second
 device signs (allowed, by design), "signed" alone stops answering "by whom".
-Small, and recorded rather than done.
+Small, and recorded rather than done (now in **What is next**).
 
 ### Laptop setup checklist
+
+*Status, 2026-10-29:* the table below was last updated 2026-08-30. On
+2026-10-21 the laptop signed with the YubiKey through PIV (`sign-offline`), so
+`pcscd` and access to the key were working by then. Which install route was
+used, and so whether `libpcsclite-dev` was needed, is not recorded.
 
 A `Projects/` subfolder is ready on the laptop and `swig` is installed
 (2026-08-30). Remaining, before `pip install -e ".[yubikey]"` will work:
@@ -1291,6 +1318,34 @@ ECDSA-P256 over the chain head at each sync, using PIV slot 9c — key generated
 on-device, non-extractable, PIN per operation. Signing the head rather than each
 note means one PIN per session, not one per note; capture stays as fast as
 typing. `verify` gains signature checking.
+
+
+## Re-measuring binning on new hardware ✅ *(2026-10-21)*
+
+The desktop now has a Radeon VII (16 GB) and a llama.cpp router beside Ollama.
+`bench/` can ask either (`--backend`), and gained a 32-note PMO test set
+(`bench/data/pmo_notes.md`, fictitious, generated outside the project), a
+logprob classifier, and a Laya run in its own venv. Numbers and caveats are in
+`bench/README.md`; the short version:
+
+- **gemma4 12b on llama.cpp is ~50x faster than the shipping default** and no
+  less accurate on what we can measure: 68/70 at under 2 s a note, against
+  deepseek-r1:14b's 100–215 s on Ollama.
+- **No method yet makes review catch the mistakes that matter.** gemma is
+  confidently wrong; Laya is honestly uncertain but misses plain cases.
+- **Update 2026-10-22, with 50 more notes (14 firm yeses in 88):** every
+  method finds only about half the notes that belong in self or team. The
+  earlier near-perfect scores came from a set with almost no positives. A
+  missed bin makes no tag, so review never sees it — which makes the backlog's
+  "labels only exist where the model said yes" a product problem, not just a
+  training one: the self and team bins are silently half empty.
+
+Nothing in `desktop/tagger.py` has changed. Moving it to llama.cpp is a backend
+setting in `core/config` and a second request builder, and waits on the above.
+
+The labels still to review, and the move to llama.cpp, are in **What is next**.
+The "bins are half empty" finding is what the safety net (below) was built for.
+
 
 ## The safety net: checking the sorting ✅ *(scoped 2026-10-22; done 2026-10-23)*
 
@@ -1365,6 +1420,23 @@ output.
    that tells the owner whether a better model or a trainer is worth it. Shown
    on the digest pages for self and team, and only once the sample is big
    enough to mean something.
+
+**Tests, at minimum:** a no is recorded with its confidence; re-sorting appends
+rather than overwrites; a person's answer still beats the model's in
+`set_tags`; each queue kind appears and disappears correctly; the audit sample
+is identical across runs and changes only when N or the key does; a superseded
+note never queues; the trust figure is withheld below the minimum sample; the
+v8 migration on a v7 database, with a v7 record's existing tags intact.
+
+**Open questions for the owner**, as scoped. All three were answered by default
+while building (parts 2 and 4); the first two are in **What is next** for the
+owner to confirm:
+- The audit rate N. 1 in 10 is a guess: high enough to fill a sample in a few
+  months of notes, low enough not to be a chore.
+- Whether an unsure no should use the same threshold as an unsure yes. A missed
+  bin is the costlier mistake, which argues for a looser one.
+- Whether the queue is offered after each sorting run, or waits to be visited.
+  Being offered is more likely to be used; it is also a nag.
 
 ### Part 1 — every answer is kept ✅ *(2026-10-22)*
 
@@ -1500,20 +1572,20 @@ now shared by the queue and the figure, so both read the same sample.
 build on part 1's table), changing the model, and a privacy tier (decided
 against, see the backlog).
 
-**Tests, at minimum:** a no is recorded with its confidence; re-sorting appends
-rather than overwrites; a person's answer still beats the model's in
-`set_tags`; each queue kind appears and disappears correctly; the audit sample
-is identical across runs and changes only when N or the key does; a superseded
-note never queues; the trust figure is withheld below the minimum sample; the
-v8 migration on a v7 database, with a v7 record's existing tags intact.
+## Both services as systemd user units ✅ *(2026-10-23)*
 
-**Open questions for the owner:**
-- The audit rate N. 1 in 10 is a guess: high enough to fill a sample in a few
-  months of notes, low enough not to be a chore.
-- Whether an unsure no should use the same threshold as an unsure yes. A missed
-  bin is the costlier mistake, which argues for a looser one.
-- Whether the queue is offered after each sorting run, or waits to be visited.
-  Being offered is more likely to be used; it is also a nag.
+`deploy/systemd/counselog-web.service` and `counselog-desktop.service`, as
+templates, and `deploy/install-user-services`, which fills them in for the
+checkout it is run from, installs them in `~/.config/systemd/user`, and
+starts them (`--no-start` to only write them). `COUNSELOG_UNIT_DIR` and
+`COUNSELOG_HOME` override where they go and which data folder they may write.
+
+Both restart on failure and run with `NoNewPrivileges`, `PrivateTmp`,
+`ProtectSystem=strict` and `ProtectHome=read-only`, with the data folder the
+one writable path (Guideline 4). Lingering is on, so they run while logged
+out. The log goes to the systemd journal; `SECURITY.md` §6 says where that is
+and who can read it. `tests/test_services.py` runs the installer into a
+temporary folder and has `systemd-analyze verify` check both units.
 
 ## Sorting from the browser ✅ *(2026-10-27)*
 

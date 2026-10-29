@@ -22,6 +22,12 @@ real data to design against (see §9).
 
 ## 3. Hardware & Topology
 
+> **Since this was written** (phase 5, 2026-09-01): the record lives on the
+> desktop, and the main interface is a browser served from it over the tailnet.
+> The desktop gained a Radeon VII. The laptop's role is signing with the
+> YubiKey. The laptop-as-source-of-truth path below still works. See
+> `tasks.md`, "Context", and `SECURITY.md` §2.
+
 | Machine | Spec | Role |
 |---|---|---|
 | Laptop | i7, 16GB RAM, ~2GB VRAM | Note capture, encrypted local storage, UI/report viewing |

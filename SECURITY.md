@@ -25,14 +25,14 @@ The adversaries this is designed against, in the order they are likely:
 
 | Who | What they can do | What stops them |
 |---|---|---|
-| **Someone who picks up the laptop** | Read files, copy the database | The database is ciphertext from byte 0. Without a registered factor it is noise. |
-| **Someone on the same network** | Watch or intercept traffic between the machines | Mutual TLS, both ends pinned to a private CA. Neither end talks to an unauthenticated peer. |
-| **Someone who copies the desktop's disk** | Read the mirror | The desktop holds no key. Reboot it and its mirror is inert ciphertext. |
-| **The person whose notes these are, later** | Quietly rewrite history to suit a dispute | The hash chain, the append-only triggers, and — once the key is in use — the signature. |
+| **Someone who copies the desktop's disk**, where the record lives | Read the database, the spool and the keyring | The database is ciphertext from byte 0, and the keyring holds the DEK only wrapped. What is left is guessing the passphrase offline, against scrypt (§3), so its strength is the protection. |
+| **Someone who picks up the laptop or the phone** | Use what is on it | No notes are stored there. An enrolled browser can write notes, not read them (§5). The YubiKey can sign, behind its PIN. |
+| **Someone on the same network** | Watch or intercept traffic | Browsers reach the desktop only through tailscale, encrypted end to end. Between `counselog` and `counselogd`, mutual TLS, both ends pinned to a private CA. |
+| **The person whose notes these are, later** | Quietly rewrite history to suit a dispute | The hash chain, the append-only triggers, and the signature, made with a key that cannot be copied off the YubiKey. |
 | **A curious process on the same machine** | Set headers, open loopback ports, read logs | Little, at that layer — see §5. A local process *can* forge the proxy's headers, so the passphrase is what actually protects the notes. The log is the weak point, see §6. |
 
 Explicitly **not** in the threat model for v0: a targeted attacker with root on
-the laptop while it is unlocked, hardware implants, a hostile Ollama build, or a
+the desktop while it is unlocked, hardware implants, a hostile Ollama build, or a
 compromised `cryptography` package. Any of those wins outright, and pretending
 otherwise would be theatre.
 
@@ -43,19 +43,31 @@ otherwise would be theatre.
 They are not interchangeable, and the split is a security control rather than a
 performance one.
 
-**The laptop** holds the DEK, the primary database, and the YubiKey. It is the
-source of truth. Everything else is derived from it.
+The design began with the laptop holding the record and the desktop only
+running the model. Since phase 5 the record lives on the desktop, and this
+section describes that.
 
-**The desktop** runs the language model and holds an encrypted mirror it can
-only read *while the laptop has lent it the DEK for a session*. It stores no key
-material of its own. The lent key lives in memory with a TTL (default 900
-seconds, `COUNSELOG_SESSION_TTL`) and is dropped on shutdown, deliberately and
-before the process exits rather than as a side effect of exiting.
+**The desktop** holds the record (the notes database, the spool and the
+keyring) and runs the browser interface and the language model. The DEK is on
+disk only wrapped (§3). It is unwrapped into memory when someone signs in, and
+dropped by the idle timeout, Lock, or the service stopping (§5, §6). A restart
+or a reboot leaves nothing on disk that can be read without the passphrase.
 
-The consequence worth stating plainly: **the desktop does see note text**, in
-memory, during a tagging or sync session. That is the price of local inference,
-and it is why the desktop is a machine you own on a network you control rather
-than a rented one.
+**The laptop** holds the YubiKey, which signs the record (§4). The desktop has
+no USB-C port, so the key never touches the machine holding the notes, and
+only a hash crosses between the two.
+
+**The original path still works.** A laptop holding a record of its own can
+lend its DEK to `counselogd` on the desktop for a session (`counselog tag`,
+`sync`), and the desktop keeps an encrypted mirror. The lent key lives in
+memory with a TTL (default 900 seconds, `COUNSELOG_SESSION_TTL`) and is
+dropped on shutdown, deliberately and before the process exits rather than as
+a side effect of exiting. Nothing uses this path day to day.
+
+The consequence worth stating plainly: **the desktop sees note text**, in
+memory, whenever someone is signed in and whenever the model sorts a note.
+That is the price of local inference, and it is why the desktop is a machine
+you own on a network you control rather than a rented one.
 
 ---
 
@@ -243,9 +255,11 @@ Being specific about this is more useful than any assurance.
 
 | Where | When | For how long |
 |---|---|---|
-| Laptop memory | While signed in | Until the idle timeout, lock, or process exit |
-| Browser service memory | While a sort started from the browser runs | Until it finishes, Stop, sign-out, Lock, or 30 minutes after that sign-in |
-| Desktop memory | During a tagging or report session | Until the session TTL expires or the process stops |
+| Browser service memory (desktop) | While someone is signed in | Until the idle timeout, Lock, or the service stopping |
+| Browser service memory (desktop) | While a sort started from the browser runs | Until it finishes, Stop, sign-out, Lock, or 30 minutes after that sign-in |
+| Ollama's memory (desktop) | While it sorts a note | Out of this program's hands. While the model stays loaded, Ollama can keep the last prompt's state to reuse (the cache found in phase 4) |
+| `counselogd` memory (desktop) | During a session lent by `counselog tag` or `sync` | Until the session TTL expires or the process stops |
+| A command-line session | While a `counselog` command runs | Until the command ends |
 | The spool file | A note written while locked | Until the next drain, then the body is cleared in place |
 | Spool quarantine | An entry that failed its checks | Kept — its ciphertext is the only copy of what may be a genuine note |
 | **The service log** | On an unhandled error | Until you delete it |
@@ -316,8 +330,9 @@ Recorded because a threat model that lists only what is handled is marketing.
   `sign-offline` / `sign-attach`), and `verify` accepted it. `counselog sign`,
   on a machine holding both the record and the key, has not been run against
   hardware; it uses the same `PivSigner`, but that is an inference, not a test.
-- **The desktop sees note text in memory** during a session. Local inference has
-  no version of this that does not.
+- **The desktop sees note text in memory** while someone is signed in, and the
+  model does while it sorts. Local inference has no version of this that does
+  not.
 - **Tagging is not reproducible.** The model's answer can depend on what was
   asked before it; the prompt ordering fixes the case that was measured, but a
   tag is a suggestion, not a fact, and low-confidence ones are held for review.

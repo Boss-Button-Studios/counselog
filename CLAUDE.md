@@ -104,19 +104,26 @@ documentation must be followed on our side of the boundary.
 
 ## Topology
 
-Two machines. They are not interchangeable.
+Two machines. They are not interchangeable. The spec drew the laptop as the
+source of truth; since phase 5 the record has lived on the desktop, and the
+browser is the main way in. `tasks.md`, "Context", has the detail.
 
 | Machine | Role | Holds |
 |---|---|---|
-| **Laptop** | Capture, storage, reading. Source of truth. | The DEK (unlocked by YubiKey or password), the primary DB, the YubiKey |
-| **Desktop** (headless, Radeon VII 16 GB) | LLM inference: bin tagging, report generation | An encrypted mirror it can only read *while the laptop has handed it the DEK for the session* |
+| **Desktop** (headless, Radeon VII 16 GB) | The record, the browser interface (`counselog-web`, over the tailnet), the model, sorting | The primary DB, the spool, the keyring with the DEK wrapped. The DEK itself only in memory, while someone is signed in |
+| **Laptop** | Signing, with the YubiKey | The YubiKey |
 
-The desktop never stores key material. Reboot it and its mirror is inert
-ciphertext. This is deliberate — see `SECURITY.md`.
+The original two-machine path still works and is tested: a laptop holding the
+record lends the DEK to `counselogd` on the desktop for a session, and the
+desktop keeps an encrypted mirror. Nothing uses it day to day.
 
-The desktop has no USB-C port, so the YubiKey never touches it. Signing a
-record held there goes through `sign-request` / `sign-offline` / `sign-attach`
-(phase 7), and only a hash crosses between the machines.
+The desktop never stores the DEK unwrapped. Restart the services or reboot,
+and everything on disk is inert ciphertext until someone signs in again. This
+is deliberate — see `SECURITY.md`.
+
+The desktop has no USB-C port, so the YubiKey never touches it. Signing the
+record goes through `sign-request` / `sign-offline` / `sign-attach` (phase 7),
+and only a hash crosses between the machines.
 
 **The GPU is shared, and nothing arbitrates it.** Ollama and the llama.cpp
 router (`~/llm/serve.sh`, port 8085, one model at a time) both load onto it over

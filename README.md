@@ -20,7 +20,11 @@ what is not, and what the record does and does not prove. Read it before relying
 on any of this. `counselog-tech-spec.md` has the design and `CLAUDE.md` the
 working rules.
 
-**Status:** v0 in development.
+**Status:** v0, in use as a test bed with no real notes yet. Everything a
+person does day to day is in the browser: write a note (locked or not), read
+and correct notes, manage people, sort new notes, check the sorting, read a
+person's digest, and check the record. Signing needs the YubiKey on the laptop.
+`tasks.md` says what is done and what is next.
 
 ## Running it
 
@@ -29,7 +33,8 @@ On the desktop, both services run as systemd user units:
     deploy/install-user-services
 
 This installs `counselog-web` (the browser interface, reached through
-`tailscale serve`) and `counselog-desktop` (sorting and the mirror), pointed at
+`tailscale serve`) and `counselog-desktop` (the mirror, and sorting from the
+command line with `counselog tag`), pointed at
 the checkout the script is run from. Both start at boot and restart if they
 fail. Lingering must be on for them to run while you are logged out
 (`loginctl enable-linger`). After pulling new code, restart them:
